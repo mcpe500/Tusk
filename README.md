@@ -190,12 +190,60 @@ Tusk/                             # Source code
 │   │   └── serial.go             # Serial communication
 │   ├── client/                   # JSON-RPC client
 │   ├── image/                    # OCI image store + pull
-│   ├── compose/                  # YAML parser
-│   └── network/                  # Network manager
+│   ├── container/                # Container runtime + spec
+│   ├── compose/                 # YAML parser
+│   └── network/                 # Network manager
+├── scripts/                     # Helper scripts
+│   ├── install.sh                # One-liner installer
+│   ├── setup-vm.sh             # VM setup
+│   ├── boot-vm.sh               # Boot VM
+│   ├── tusk-vm.sh               # VM management
+│   └── configure-alpine.sh       # Configure Alpine inside VM
 └── pkg/
     ├── types/                    # OCI data types
     ├── protocol/                 # API protocol
     └── util/                     # Utilities
+```
+
+---
+
+## 🚀 Quick Start dengan VM
+
+### 1. Install Script (One-liner)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mcpe500/Tusk/main/scripts/install.sh | bash
+```
+
+### 2. Setup VM
+
+```bash
+# Create VM disk
+./scripts/tusk-vm.sh create
+
+# Install Alpine (interactive - follow prompts)
+./scripts/tusk-vm.sh install
+
+# Login as root, then run:
+./scripts/configure-alpine.sh
+
+# Reboot
+reboot
+```
+
+### 3. Start & Use
+
+```bash
+# Start VM
+./scripts/tusk-vm.sh start
+
+# Or use tusk CLI
+tusk init
+tusk start
+
+# Run container!
+tusk pull alpine:latest
+tusk run alpine echo "Hello from Tusk!"
 ```
 
 ---
