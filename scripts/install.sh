@@ -86,13 +86,22 @@ init_tusk() {
 
     "$TUSK_BIN" init
 
-    # Copy tuskd to VM directory (only if not already there)
+    # Copy tuskd to VM directory (skip if already exists)
     mkdir -p "$TUSK_DIR/vm"
-    if [ "$TUSKD_BIN" != "$TUSK_DIR/tuskd-amd64" ]; then
+    if [ ! -f "$TUSK_DIR/tuskd-amd64" ]; then
         cp "$TUSKD_BIN" "$TUSK_DIR/"
     fi
 
     log "Tusk initialized!"
+}
+
+add_to_path() {
+    # Add $HOME to PATH if not already there
+    if ! echo "$PATH" | grep -q "$HOME"; then
+        echo 'export PATH=$HOME:$PATH' >> ~/.bashrc
+        export PATH="$HOME:$PATH"
+        warn "Added $HOME to PATH. Restart shell or run: source ~/.bashrc"
+    fi
 }
 
 print_next_steps() {
@@ -141,6 +150,7 @@ main() {
     clone_or_update
     build_tusk
     init_tusk
+    add_to_path
     print_next_steps
 }
 
