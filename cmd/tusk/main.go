@@ -143,20 +143,17 @@ func runUpdate() {
 }
 
 func runInstall() {
-	fmt.Println("Tusk Auto-Install")
+	fmt.Println("Tusk Installer")
 	fmt.Println("")
 	fmt.Println("This will:")
-	fmt.Println("1. Create VM disk (if needed)")
-	fmt.Println("2. Download Alpine ISO (if needed)")
-	fmt.Println("3. Install Alpine Linux (fully automated)")
-	fmt.Println("4. Configure tuskd")
-	fmt.Println("5. Start the VM")
+	fmt.Println("1. Download pre-built Alpine VM with tuskd")
+	fmt.Println("2. Start the VM automatically")
 	fmt.Println("")
-	fmt.Println("Starting in 3 seconds...")
-	time.Sleep(3 * time.Second)
+	fmt.Println("If download fails, it will build from scratch.")
+	fmt.Println("")
 
-	// Run the auto-install script
-	scriptPath := filepath.Join(os.Getenv("HOME"), "Tusk", "scripts", "auto-install.sh")
+	// Run the prebuilt-install script
+	scriptPath := filepath.Join(os.Getenv("HOME"), "Tusk", "scripts", "prebuilt-install.sh")
 
 	cmd := exec.Command("bash", scriptPath)
 	cmd.Stdout = os.Stdout
@@ -164,8 +161,17 @@ func runInstall() {
 	cmd.Stdin = os.Stdin
 
 	if err := cmd.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: install failed: %v\n", err)
-		os.Exit(1)
+		fmt.Fprintf(os.Stderr, "Pre-built download failed, trying build from scratch...\n")
+		// Fallback to auto-install
+		autoScript := filepath.Join(os.Getenv("HOME"), "Tusk", "scripts", "auto-install.sh")
+		cmd = exec.Command("bash", autoScript)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		cmd.Stdin = os.Stdin
+		if err := cmd.Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "Install failed: %v\n", err)
+			os.Exit(1)
+		}
 	}
 }
 
@@ -175,9 +181,8 @@ func printUsage() {
 Usage:
   tusk version           Show version
   tusk update            Update Tusk to latest
-  tusk install           Auto-install Alpine VM (fully automated)
+  tusk install           Download pre-built VM and start (no QEMU interaction)
   tusk init              Initialize Tusk storage
-  tusk start             Start the Tusk VM
   tusk start             Start the Tusk VM
   tusk stop              Stop the Tusk VM
   tusk status            Show VM status
