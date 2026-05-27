@@ -9,8 +9,9 @@ import (
 )
 
 type QMPClient struct {
-	conn   net.Conn
-	decoder *json.Decoder
+	sockPath string
+	conn     net.Conn
+	decoder  *json.Decoder
 }
 
 type QMPMessage struct {
@@ -28,11 +29,11 @@ type QMPError struct {
 }
 
 func NewQMPClient(sockPath string) (*QMPClient, error) {
-	return &QMPClient{}, nil
+	return &QMPClient{sockPath: sockPath}, nil
 }
 
 func (c *QMPClient) Connect() error {
-	conn, err := net.DialTimeout("unix", "", 5*time.Second)
+	conn, err := net.DialTimeout("unix", c.sockPath, 5*time.Second)
 	if err != nil {
 		return fmt.Errorf("dial qmp: %w", err)
 	}
