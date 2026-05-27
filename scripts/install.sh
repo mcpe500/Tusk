@@ -86,9 +86,11 @@ init_tusk() {
 
     "$TUSK_BIN" init
 
-    # Copy tuskd to VM directory
+    # Copy tuskd to VM directory (only if not already there)
     mkdir -p "$TUSK_DIR/vm"
-    cp "$TUSKD_BIN" "$TUSK_DIR/"
+    if [ "$TUSKD_BIN" != "$TUSK_DIR/tuskd-amd64" ]; then
+        cp "$TUSKD_BIN" "$TUSK_DIR/"
+    fi
 
     log "Tusk initialized!"
 }
@@ -97,22 +99,35 @@ print_next_steps() {
     echo ""
     log "Tusk installed successfully!"
     echo ""
+    echo "Usage:"
+    echo "  ~/tusk <command>"
+    echo ""
+    echo "Or add to PATH:"
+    echo "  echo 'export PATH=\$HOME:\$PATH' >> ~/.bashrc"
+    echo ""
     echo "Next steps:"
     echo ""
-    echo "1. Setup Alpine VM disk:"
-    echo "   ./scripts/setup-vm.sh"
+    echo "1. Create Alpine VM disk:"
+    echo "   ~/Tusk/scripts/tusk-vm.sh create"
     echo ""
-    echo "2. Or use pre-built disk (when available):"
-    echo "   # Download from releases"
+    echo "2. Install Alpine Linux (interactive):"
+    echo "   ~/Tusk/scripts/tusk-vm.sh install"
+    echo "   - Login: root (no password)"
+    echo "   - Run: setup-alpine"
+    echo "   - Choose 'virt' disk mode"
+    echo "   - Use 'sys' install"
+    echo "   - After install: poweroff"
     echo ""
-    echo "3. Start Tusk:"
-    echo "   tusk init"
-    echo "   tusk start"
-    echo "   tusk status"
+    echo "3. Configure Alpine (after install):"
+    echo "   ~/Tusk/scripts/tusk-vm.sh start"
+    echo "   # Inside VM, login as root and run:"
+    echo "   ~/Tusk/scripts/configure-alpine.sh"
+    echo "   # Then reboot"
     echo ""
-    echo "4. Run a container:"
-    echo "   tusk pull alpine:latest"
-    echo "   tusk run alpine echo hello"
+    echo "4. Start using Tusk:"
+    echo "   ~/tusk status"
+    echo "   ~/tusk pull alpine:latest"
+    echo "   ~/tusk run alpine echo hello"
     echo ""
 }
 
