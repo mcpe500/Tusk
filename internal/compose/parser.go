@@ -82,8 +82,9 @@ func (o *Orchestrator) Down() error {
 func (o *Orchestrator) PS() error {
 	for name, svc := range o.spec.Services {
 		fmt.Printf("%s: image=%s\n", name, svc.Image)
-		if len(svc.Command) > 0 {
-			fmt.Printf("  command: %v\n", svc.Command)
+		cmd := svc.ParseCommand()
+		if len(cmd) > 0 {
+			fmt.Printf("  command: %v\n", cmd)
 		}
 	}
 	return nil
@@ -111,29 +112,34 @@ func (o *Orchestrator) createVolume(name string, vol types.Volume) error {
 func (o *Orchestrator) startServices() error {
 	// Simple: start all services
 	for name, svc := range o.spec.Services {
-		fmt.Printf("Starting service: %s (image: %s)\n", name, svc.Image)
-
-		// Check dependencies
-		for _, dep := range svc.DependsOn {
-			var depName string
-			switch v := dep.(type) {
-			case string:
-				depName = v
-			default:
-				if m, ok := dep.(map[string]interface{}); ok {
-					depName = ""
-					for k := range m {
-						depName = k
-						break
-					}
-				}
-			}
-			if depName != "" {
-				fmt.Printf("  depends on: %s\n", depName)
-			}
+		if svc.Image != "" {
+			fmt.Printf("Starting service: %s (image: %s)\n", name, svc.Image)
+		} else if svc.Build != nil {
+			fmt.Printf("Starting service: %s (build: %s/%s)\n", name, svc.Build.Context, svc.Build.Dockerfile)
 		}
 
-		// TODO: Actually create and start containers
+		// Show ports
+		for _, port := range svc.Ports {
+			fmt.Printf("  port: %s\n", port)
+		}
+
+		// Show environment
+		for _, env := range svc.Environment {
+			fmt.Printf("  env: %s\n", env)
+		}
+
+		// Show volumes
+		for _, vol := range svc.Volumes {
+			fmt.Printf("  volume: %s\n", vol)
+		}
+
+		// Check dependencies (just log them for now)
+		for _, dep := range svc.DependsOn {
+			fmt.Printf("  depends on: %s\n", dep)
+		}
+
+		fmt.Println("")
+		// TODO: Actually create and start containers via tuskd
 	}
 	return nil
 }

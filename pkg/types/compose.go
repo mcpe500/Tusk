@@ -1,5 +1,7 @@
 package types
 
+import "gopkg.in/yaml.v3"
+
 type ComposeSpec struct {
 	Version  string                 `json:"version"`
 	Services map[string]Service     `json:"services"`
@@ -12,38 +14,59 @@ type ComposeSpec struct {
 type Service struct {
 	Image      string            `json:"image"`
 	Build      *BuildSpec        `json:"build,omitempty"`
-	Command    []string          `json:"command,omitempty"`
-	Entrypoint []string          `json:"entrypoint,omitempty"`
-	DependsOn  []ServiceDep     `json:"depends_on,omitempty"`
-	Ports      []PortSpec       `json:"ports,omitempty"`
-	Volumes    []VolumeSpec     `json:"volumes,omitempty"`
+	Command    any               `json:"command,omitempty"`
+	Entrypoint any               `json:"entrypoint,omitempty"`
+	DependsOn  []string          `json:"depends_on,omitempty"`
+	Ports      []string          `json:"ports,omitempty"`
+	Volumes    []string          `json:"volumes,omitempty"`
 	Environment []string         `json:"environment,omitempty"`
 	EnvFile    []string          `json:"env_file,omitempty"`
 	Networks   []string          `json:"networks,omitempty"`
 	Labels     map[string]string `json:"labels,omitempty"`
-	CommandString string         `json:"command_string,omitempty"`
-	ContainerName string        `json:"container_name,omitempty"`
+	ContainerName string          `json:"container_name,omitempty"`
 	Restart    string            `json:"restart,omitempty"`
-	HealthCheck *HealthCheck     `json:"healthcheck,omitempty"`
-	Deploy     *DeploySpec       `json:"deploy,omitempty"`
-	User       string            `json:"user,omitempty"`
 	WorkingDir string            `json:"working_dir,omitempty"`
 	Links      []string          `json:"links,omitempty"`
-	ExternalLinks []string       `json:"external_links,omitempty"`
 	Pid        string            `json:"pid,omitempty"`
 	NetworkMode string           `json:"network_mode,omitempty"`
 	DNS        []string          `json:"dns,omitempty"`
-	DNSOpts    []string          `json:"dns_opt,omitempty"`
-	DNSSearch  []string          `json:"dns_search,omitempty"`
 	ExtraHosts []string          `json:"extra_hosts,omitempty"`
 	Hostname   string            `json:"hostname,omitempty"`
-	IPC        string            `json:"ipc,omitempty"`
-	MacAddress string            `json:"mac_address,omitempty"`
-	Privileged bool              `json:"privileged,omitempty"`
-	ReadOnly   bool              `json:"read_only,omitempty"`
-	ShmSize    interface{}       `json:"shm_size,omitempty"`
 	StdinOpen  bool              `json:"stdin_open,omitempty"`
 	Tty        bool              `json:"tty,omitempty"`
+}
+
+// ParseCommand parses command which can be either a string or []string
+func (s *Service) ParseCommand() []string {
+	if s.Command == nil {
+		return nil
+	}
+	switch v := s.Command.(type) {
+	case string:
+		return []string{v}
+	case []interface{}:
+		result := make([]string, 0, len(v))
+		for _, item := range v {
+			if str, ok := item.(string); ok {
+				result = append(result, str)
+			}
+		}
+		return result
+	case []string:
+		return v
+	}
+	return nil
+}
+
+// MarshalYAML fix for command parsing
+func (s *Service) UnmarshalYAML(value *yaml.Node) error {
+	type rawService Service
+	var raw rawService
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+	*s = Service(raw)
+	return nil
 }
 
 type BuildSpec struct {
@@ -56,59 +79,6 @@ type BuildSpec struct {
 
 type ServiceDep struct {
 	Condition string `json:"condition,omitempty"`
-}
-
-type PortSpec struct {
-	Target    int    `json:"target"`
-	Published int    `json:"published,omitempty"`
-	Protocol  string `json:"protocol,omitempty"`
-}
-
-type VolumeSpec struct {
-	Type        string `json:"type"`
-	Source      string `json:"source,omitempty"`
-	Target      string `json:"target,omitempty"`
-	ReadOnly    bool   `json:"read_only,omitempty"`
-	BindOptions *BindOptions `json:"bind_options,omitempty"`
-	VolumeOptions *VolumeOptions `json:"volume_options,omitempty"`
-}
-
-type BindOptions struct {
-	Propagation string `json:"propagation,omitempty"`
-}
-
-type VolumeOptions struct {
-	NoCopy bool `json:"nocopy,omitempty"`
-}
-
-type HealthCheck struct {
-	Test        []string `json:"test,omitempty"`
-	Interval    string   `json:"interval,omitempty"`
-	Timeout     string   `json:"timeout,omitempty"`
-	Retries     int      `json:"retries,omitempty"`
-	StartPeriod string   `json:"start_period,omitempty"`
-}
-
-type DeploySpec struct {
-	Replicas  int               `json:"replicas,omitempty"`
-	Resources *DeployResources  `json:"resources,omitempty"`
-	RestartPolicy *RestartPolicy `json:"restart_policy,omitempty"`
-}
-
-type DeployResources struct {
-	Limits       *ResourceSpec `json:"limits,omitempty"`
-	Reservations *ResourceSpec `json:"reservations,omitempty"`
-}
-
-type ResourceSpec struct {
-	MemoryBytes   int64 `json:"memory_bytes,omitempty"`
-	NanoCPUs      int64 `json:"nano_cpus,omitempty"`
-}
-
-type RestartPolicy struct {
-	Condition string `json:"condition,omitempty"`
-	Delay     string `json:"delay,omitempty"`
-	MaxAttempts int  `json:"max_attempts,omitempty"`
 }
 
 type Network struct {

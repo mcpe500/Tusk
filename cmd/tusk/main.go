@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/tusk/tusk/internal/client"
+	"github.com/tusk/tusk/internal/compose"
 	"github.com/tusk/tusk/internal/image"
 	"github.com/tusk/tusk/internal/vm"
 	"github.com/tusk/tusk/pkg/protocol"
@@ -667,11 +668,33 @@ func runComposeUp(composeFile string) {
 		os.Exit(1)
 	}
 
-	fmt.Printf("Starting compose services from %s...\n", composeFile)
-	fmt.Println("(Full compose implementation coming in Phase 5)")
+	fmt.Printf("Parsing compose file: %s\n", composeFile)
+
+	// Parse compose file
+	parser := compose.NewParser()
+	spec, err := parser.Parse(composeFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: failed to parse compose file: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Get work directory
+	workDir, _ := filepath.Abs(filepath.Dir(composeFile))
+
+	// Create orchestrator
+	orch := compose.NewOrchestrator(spec, workDir)
+
+	fmt.Println("Starting services...")
+
+	// Start services
+	if err := orch.Up(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: failed to start services: %v\n", err)
+		os.Exit(1)
+	}
+
 	fmt.Println("")
-	fmt.Println("For now, you can manually run containers:")
-	fmt.Println("  tusk run --name <service-name> <image>")
+	fmt.Println("Services started!")
+	fmt.Println("Use 'tusk ps' to see running containers")
 }
 
 func runNetwork() {
