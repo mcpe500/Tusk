@@ -30,6 +30,8 @@ func main() {
 	switch cmd {
 	case "version":
 		runVersion()
+	case "update":
+		runUpdate()
 	case "init":
 		runInit()
 	case "start":
@@ -78,10 +80,71 @@ func runVersion() {
 	fmt.Println("Container runtime for Termux using QEMU VM")
 }
 
+func runUpdate() {
+	fmt.Println("Updating Tusk...")
+
+	tuskBin := filepath.Join(os.Getenv("HOME"), "tusk")
+
+	// Check if git is available
+	if _, err := exec.LookPath("git"); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: git not found. Cannot update.\n")
+		os.Exit(1)
+	}
+
+	// Get Tusk directory
+	tuskDir := filepath.Join(os.Getenv("HOME"), "Tusk")
+
+	// Pull latest from git
+	fmt.Println("Pulling latest from GitHub...")
+	cmd := exec.Command("git", "-C", tuskDir, "pull", "origin", "main")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: failed to pull updates: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Rebuild tusk binary
+	fmt.Println("Building tusk...")
+	cmd = exec.Command("go", "build", "-o", tuskBin, "./cmd/tusk")
+	cmd.Dir = tuskDir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: failed to build tusk: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Rebuild tuskd for VM
+	fmt.Println("Building tuskd (x86_64)...")
+	tuskdBin := filepath.Join(os.Getenv("HOME"), ".tusk", "tuskd-amd64")
+	cmd = exec.Command("go", "build", "-ldflags=-s -w", "-o", tuskdBin, "./cmd/tuskd")
+	cmd.Dir = tuskDir
+	cmd.Env = []string{
+		"GOOS=linux",
+		"GOARCH=amd64",
+		"CGO_ENABLED=0",
+		"PATH=" + os.Getenv("PATH"),
+		"HOME=" + os.Getenv("HOME"),
+	}
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: failed to build tuskd: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Println("")
+	fmt.Println("Update complete!")
+	fmt.Printf("Run 'tusk version' to verify\n")
+}
+
 func printUsage() {
 	fmt.Println(`Tusk - Container runtime for Termux
 
 Usage:
+  tusk version           Show version
+  tusk update            Update Tusk to latest
   tusk init              Initialize Tusk (download base VM)
   tusk start             Start the Tusk VM
   tusk stop              Stop the Tusk VM
