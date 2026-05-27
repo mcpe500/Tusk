@@ -1,0 +1,49 @@
+# Binaries
+tusk
+tuskd
+*.exe
+
+# Build artifacts
+dist/
+build/
+*.o
+*.a
+
+# Go
+vendor/
+go.work
+go.work.sum
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test
+*.test
+coverage.out
+coverage.html
+
+# Runtime data
+.tusk/
+*.sock
+*.qcow2
+*.img
+
+# Logs
+*.log
+
+# Local config
+.env
+.env.local
+
+# Temporary files
+tmp/
+temp/
+*.tmp
