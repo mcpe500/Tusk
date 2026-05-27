@@ -473,15 +473,64 @@ func runRM(id string) {
 }
 
 func runCompose() {
+	// Check for help flag
+	for _, arg := range os.Args[2:] {
+		if arg == "-h" || arg == "--help" {
+			fmt.Println("Usage: tusk compose [opts] <command>")
+			fmt.Println("")
+			fmt.Println("Options:")
+			fmt.Println("  -f <file>, --file <file>   Compose file (default: docker-compose.yml)")
+			fmt.Println("")
+			fmt.Println("Commands:")
+			fmt.Println("  up      Start services")
+			fmt.Println("  down    Stop services")
+			fmt.Println("  ps      List services")
+			fmt.Println("  build   Build images")
+			fmt.Println("  logs    View logs")
+			fmt.Println("  rm      Remove services")
+			fmt.Println("  stop    Stop services")
+			fmt.Println("")
+			fmt.Println("Examples:")
+			fmt.Println("  tusk compose up")
+			fmt.Println("  tusk compose -f docker-compose.yml up")
+			return
+		}
+	}
+
 	if len(os.Args) < 3 {
-		fmt.Println("Usage: tusk compose <command>")
+		fmt.Println("Usage: tusk compose [opts] <command>")
+		fmt.Println("  -f <file>   Compose file (default: docker-compose.yml)")
 		return
 	}
 
-	subcmd := os.Args[2]
+	// Parse flags
+	var composeFile string
+	args := os.Args[2:]
+	i := 0
+	for i < len(args) && strings.HasPrefix(args[i], "-") {
+		if args[i] == "-f" || args[i] == "--file" {
+			if i+1 >= len(args) {
+				fmt.Fprintf(os.Stderr, "Error: -f requires a file argument\n")
+				os.Exit(1)
+			}
+			composeFile = args[i+1]
+			i += 2
+		} else {
+			fmt.Fprintf(os.Stderr, "Unknown flag: %s\n", args[i])
+			os.Exit(1)
+		}
+	}
+
+	if i >= len(args) {
+		fmt.Println("Usage: tusk compose [opts] <command>")
+		fmt.Println("Commands: up, down, ps, build, logs, rm, stop")
+		return
+	}
+
+	subcmd := args[i]
 	switch subcmd {
 	case "up":
-		fmt.Println("Compose up not implemented yet")
+		runComposeUp(composeFile)
 	case "down":
 		fmt.Println("Compose down not implemented yet")
 	case "ps":
@@ -541,6 +590,25 @@ func runContainerStop(id string) {
 	}
 
 	fmt.Printf("Container %s stopped\n", id)
+}
+
+func runComposeUp(composeFile string) {
+	if composeFile == "" {
+		composeFile = "docker-compose.yml"
+	}
+
+	// Check if file exists
+	if _, err := os.Stat(composeFile); os.IsNotExist(err) {
+		fmt.Fprintf(os.Stderr, "Error: compose file not found: %s\n", composeFile)
+		fmt.Println("Use -f <file> to specify a different compose file")
+		os.Exit(1)
+	}
+
+	fmt.Printf("Starting compose services from %s...\n", composeFile)
+	fmt.Println("(Full compose implementation coming in Phase 5)")
+	fmt.Println("")
+	fmt.Println("For now, you can manually run containers:")
+	fmt.Println("  tusk run --name <service-name> <image>")
 }
 
 func runNetwork() {
