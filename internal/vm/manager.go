@@ -84,8 +84,8 @@ func (m *Manager) Start(ctx context.Context, cfg *Config) error {
 	// QMP socket for VM control
 	args = append(args, "-qmp", fmt.Sprintf("unix:%s,server,nowait", m.qmpSock))
 
-	// virtio-serial for CLI communication
-	args = append(args, "-serial", fmt.Sprintf("unix:%s", m.serialSock))
+	// virtio-serial for CLI communication (server mode so QEMU creates socket)
+	args = append(args, "-serial", fmt.Sprintf("unix:%s,server,nowait", m.serialSock))
 
 	// Network: user-mode NAT
 	args = append(args, "-netdev", "user,id=net0")
