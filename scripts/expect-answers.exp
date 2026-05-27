@@ -1,0 +1,48 @@
+#!/usr/bin/expect -f
+# Auto-answer script for Alpine installer
+# Usage: expect -f auto-answer.exp
+
+set timeout 3600
+set answers {
+    ""
+    "localhost"
+    "eth0"
+    "dhcp"
+    "n"
+    "UTC"
+    "none"
+    "chrony"
+    "none"
+    "n"
+    "openssh"
+    "prohibit-password"
+    "none"
+    "vda"
+    "sys"
+    "none"
+    "none"
+    "y"
+}
+
+spawn qemu-system-x86_64 {*}$argv
+
+set answer_idx 0
+expect {
+    -re "(localhost|Which disk|Enter system hostname|Password for root|Which timezone|Proxy|mirror number|Setup a user|Which ssh server|Root ssh login|ssh key|Available disks|store configs|How would you like to proceed)" {
+        if {$answer_idx < [llength $answers]} {
+            send "[lindex $answers $answer_idx]\r"
+            incr answer_idx
+        }
+        exp_continue
+    }
+    "Installation is complete" {
+        send "poweroff\r"
+    }
+    "localhost login:" {
+        incr answer_idx -1
+        exp_continue
+    }
+    eof
+}
+
+wait

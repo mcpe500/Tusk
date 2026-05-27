@@ -33,6 +33,8 @@ func main() {
 		runVersion()
 	case "update":
 		runUpdate()
+	case "install":
+		runInstall()
 	case "init":
 		runInit()
 	case "start":
@@ -140,13 +142,42 @@ func runUpdate() {
 	fmt.Printf("Run 'tusk version' to verify\n")
 }
 
+func runInstall() {
+	fmt.Println("Tusk Auto-Install")
+	fmt.Println("")
+	fmt.Println("This will:")
+	fmt.Println("1. Create VM disk (if needed)")
+	fmt.Println("2. Download Alpine ISO (if needed)")
+	fmt.Println("3. Install Alpine Linux (fully automated)")
+	fmt.Println("4. Configure tuskd")
+	fmt.Println("5. Start the VM")
+	fmt.Println("")
+	fmt.Println("Starting in 3 seconds...")
+	time.Sleep(3 * time.Second)
+
+	// Run the auto-install script
+	scriptPath := filepath.Join(os.Getenv("HOME"), "Tusk", "scripts", "auto-install.sh")
+
+	cmd := exec.Command("bash", scriptPath)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: install failed: %v\n", err)
+		os.Exit(1)
+	}
+}
+
 func printUsage() {
 	fmt.Println(`Tusk - Container runtime for Termux
 
 Usage:
   tusk version           Show version
   tusk update            Update Tusk to latest
-  tusk init              Initialize Tusk (download base VM)
+  tusk install           Auto-install Alpine VM (fully automated)
+  tusk init              Initialize Tusk storage
+  tusk start             Start the Tusk VM
   tusk start             Start the Tusk VM
   tusk stop              Stop the Tusk VM
   tusk status            Show VM status

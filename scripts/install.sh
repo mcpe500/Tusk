@@ -8,6 +8,11 @@ TUSK_DIR="$HOME/.tusk"
 TUSK_BIN="$HOME/tusk"
 TUSKD_BIN="$TUSK_DIR/tuskd-amd64"
 
+# Check if running from Tusk directory
+if [ -f "scripts/install.sh" ] && [ "$(dirname "$0")" = "scripts" ] || [ "$(basename "$0")" = "install.sh" ]; then
+    cd "$HOME/Tusk" 2>/dev/null || true
+fi
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
