@@ -31,6 +31,19 @@ func main() {
 	switch cmd {
 	case "version":
 		runVersion()
+	case "ls":
+		if len(os.Args) >= 3 {
+			switch os.Args[2] {
+			case "ps":
+				runPS()
+			case "images":
+				runImages()
+			default:
+				fmt.Println("Usage: tusk ls [images|ps]")
+			}
+			return
+		}
+		runImages()
 	case "update":
 		runUpdate()
 	case "install":
@@ -246,7 +259,8 @@ func printUsage() {
 Usage:
   tusk version           Show version
   tusk update            Update Tusk to latest
-   tusk install [--verbose]  Download pre-built VM and start
+  tusk install [--verbose]  Download pre-built VM and start
+  tusk ls [images|ps]    Alias for images or ps
   tusk init              Initialize Tusk storage
   tusk start             Start the Tusk VM
   tusk stop              Stop the Tusk VM
