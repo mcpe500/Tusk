@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Tusk Quick Test Script
 # Run this to verify basic functionality
 

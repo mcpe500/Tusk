@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Tusk VM Pre-configuration Script
 # Configures installed Alpine to auto-start tuskd
 # Run this INSIDE the Alpine VM after installation

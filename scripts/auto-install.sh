@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Tusk Auto-Install - Fully automated Alpine installation in QEMU
 # Run this ONCE after installing Tusk: tusk install
 # No manual intervention needed!
@@ -138,6 +138,7 @@ run_installer() {
     fi
 
     cleanup
+    create_answers
 
     # Wait for network
     log "Waiting for network..."
@@ -204,7 +205,7 @@ run_installer() {
     log "Installation in progress... (this may take 5-10 minutes)"
 
     # Monitor for completion
-    INSTALL_TIMEOUT=600
+    INSTALL_TIMEOUT=1200
     ELAPSED=0
     while [ $ELAPSED -lt $INSTALL_TIMEOUT ]; do
         if ! kill -0 $QEMU_PID 2>/dev/null; then

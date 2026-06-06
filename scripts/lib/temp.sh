@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Shared temporary path helpers for Termux-compatible environments.
 

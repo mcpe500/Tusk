@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -127,16 +128,22 @@ func runDaemon() {
 func handleConnection(conn net.Conn, store *ContainerStore) {
 	defer conn.Close()
 
-	dec := json.NewDecoder(conn)
+	reader := bufio.NewReader(conn)
 	enc := json.NewEncoder(conn)
 
 	for {
-		var req map[string]interface{}
-		if err := dec.Decode(&req); err != nil {
+		raw, err := readJSONObject(reader)
+		if err != nil {
 			if err != io.EOF {
-				fmt.Fprintf(os.Stderr, "Decode error: %v\n", err)
+				fmt.Fprintf(os.Stderr, "Read error: %v\n", err)
 			}
 			return
+		}
+
+		var req map[string]interface{}
+		if err := json.Unmarshal(raw, &req); err != nil {
+			// Skip invalid JSON garbage
+			continue
 		}
 
 		jsonrpc := req["jsonrpc"]
@@ -469,4 +476,59 @@ func (s *ContainerStore) Logs(id string) string {
 
 func generateID() string {
 	return fmt.Sprintf("%x", time.Now().UnixNano())
+}
+
+func readJSONObject(reader *bufio.Reader) ([]byte, error) {
+	// Skip leading garbage until '{'
+	for {
+		b, err := reader.ReadByte()
+		if err != nil {
+			return nil, err
+		}
+		if b == '{' {
+			if err := reader.UnreadByte(); err != nil {
+				return nil, err
+			}
+			break
+		}
+	}
+
+	var buf bytes.Buffer
+	braces := 0
+	inString := false
+	escaped := false
+
+	for {
+		b, err := reader.ReadByte()
+		if err != nil {
+			return nil, err
+		}
+		buf.WriteByte(b)
+
+		if escaped {
+			escaped = false
+			continue
+		}
+
+		if b == '\\' {
+			escaped = true
+			continue
+		}
+
+		if b == '"' {
+			inString = !inString
+			continue
+		}
+
+		if !inString {
+			if b == '{' {
+				braces++
+			} else if b == '}' {
+				braces--
+				if braces == 0 {
+					return buf.Bytes(), nil
+				}
+			}
+		}
+	}
 }

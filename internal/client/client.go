@@ -1,10 +1,13 @@
 package client
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/tusk/tusk/pkg/protocol"
@@ -14,6 +17,8 @@ type Client struct {
 	sockPath string
 	timeout  time.Duration
 	conn     net.Conn
+	reader   *bufio.Reader
+	mu       sync.Mutex
 }
 
 func New(sockPath string) *Client {
@@ -29,17 +34,78 @@ func (c *Client) Connect() error {
 		return fmt.Errorf("dial: %w", err)
 	}
 	c.conn = conn
+	c.reader = bufio.NewReader(conn)
 	return nil
 }
 
 func (c *Client) Close() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if c.conn != nil {
 		return c.conn.Close()
 	}
 	return nil
 }
 
+func (c *Client) readJSONObject() ([]byte, error) {
+	// Skip leading garbage until '{'
+	for {
+		b, err := c.reader.ReadByte()
+		if err != nil {
+			return nil, err
+		}
+		if b == '{' {
+			if err := c.reader.UnreadByte(); err != nil {
+				return nil, err
+			}
+			break
+		}
+	}
+
+	var buf bytes.Buffer
+	braces := 0
+	inString := false
+	escaped := false
+
+	for {
+		b, err := c.reader.ReadByte()
+		if err != nil {
+			return nil, err
+		}
+		buf.WriteByte(b)
+
+		if escaped {
+			escaped = false
+			continue
+		}
+
+		if b == '\\' {
+			escaped = true
+			continue
+		}
+
+		if b == '"' {
+			inString = !inString
+			continue
+		}
+
+		if !inString {
+			if b == '{' {
+				braces++
+			} else if b == '}' {
+				braces--
+				if braces == 0 {
+					return buf.Bytes(), nil
+				}
+			}
+		}
+	}
+}
+
 func (c *Client) call(method string, params interface{}) (json.RawMessage, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	if c.conn == nil {
 		if err := c.Connect(); err != nil {
 			return nil, err
@@ -72,22 +138,37 @@ func (c *Client) call(method string, params interface{}) (json.RawMessage, error
 		return nil, fmt.Errorf("set read deadline: %w", err)
 	}
 
-	var resp protocol.JSONRPCResponse
-	dec := json.NewDecoder(c.conn)
-	if err := dec.Decode(&resp); err != nil {
-		return nil, fmt.Errorf("read: %w", err)
-	}
-	if resp.JSONRPC != "" && resp.JSONRPC != "2.0" {
-		return nil, fmt.Errorf("invalid jsonrpc: %s", resp.JSONRPC)
-	}
-	if resp.Error != nil {
-		return nil, fmt.Errorf("rpc error %d: %s", resp.Error.Code, resp.Error.Message)
-	}
-	if len(bytes.TrimSpace(resp.Result)) == 0 {
-		return nil, fmt.Errorf("empty rpc result")
-	}
+	// Read and parse responses until we find a valid JSON-RPC one
+	for {
+		raw, err := c.readJSONObject()
+		if err != nil {
+			if err == io.EOF {
+				return nil, fmt.Errorf("connection closed")
+			}
+			return nil, fmt.Errorf("read: %w", err)
+		}
 
-	return resp.Result, nil
+		var resp protocol.JSONRPCResponse
+		if err := json.Unmarshal(raw, &resp); err != nil {
+			// Not a valid JSON-RPC object, probably a log message that happened to contain braces
+			// Skip and continue reading
+			continue
+		}
+
+		// Basic validation that this is our response
+		if resp.JSONRPC != "2.0" {
+			continue
+		}
+
+		if resp.Error != nil {
+			return nil, fmt.Errorf("rpc error %d: %s", resp.Error.Code, resp.Error.Message)
+		}
+		if len(bytes.TrimSpace(resp.Result)) == 0 {
+			return nil, fmt.Errorf("empty rpc result")
+		}
+
+		return resp.Result, nil
+	}
 }
 
 func unmarshalResult(method string, raw json.RawMessage, target any) error {

@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bufio"
 	"encoding/json"
 	"net"
 	"strings"
@@ -10,6 +11,52 @@ import (
 	"github.com/tusk/tusk/pkg/protocol"
 )
 
+func setupTestClient(cConn net.Conn) *Client {
+	cli := New("unused")
+	cli.conn = cConn
+	cli.reader = bufio.NewReader(cConn)
+	cli.timeout = 1 * time.Second
+	return cli
+}
+
+func TestCallWithGarbage(t *testing.T) {
+	cConn, sConn := net.Pipe()
+	t.Cleanup(func() {
+		_ = cConn.Close()
+		_ = sConn.Close()
+	})
+
+	cli := setupTestClient(cConn)
+
+	go func() {
+		// Server should read the request in background to avoid deadlock with net.Pipe
+		go func() {
+			dec := json.NewDecoder(sConn)
+			var req protocol.JSONRPCRequest
+			_ = dec.Decode(&req)
+		}()
+
+		// Server sends garbage then JSON
+		_, _ = sConn.Write([]byte("Linux version 6.6.13-0-virt (alpine@alpine) ...\n"))
+		_, _ = sConn.Write([]byte("Login: [  0.123] { garbage brace }\n"))
+		
+		resp := protocol.JSONRPCResponse{
+			JSONRPC: "2.0",
+			Result:  json.RawMessage(`"pong"`),
+			ID:      1,
+		}
+		_ = json.NewEncoder(sConn).Encode(resp)
+	}()
+
+	res, err := cli.call("Ping", nil)
+	if err != nil {
+		t.Fatalf("call failed: %v", err)
+	}
+	if string(res) != `"pong"` {
+		t.Fatalf("unexpected result: %s", string(res))
+	}
+}
+
 func TestCallDecodesChunkedResponse(t *testing.T) {
 	cConn, sConn := net.Pipe()
 	t.Cleanup(func() {
@@ -17,15 +64,12 @@ func TestCallDecodesChunkedResponse(t *testing.T) {
 		_ = sConn.Close()
 	})
 
-	cli := New("unused")
-	cli.conn = cConn
-	cli.timeout = 500 * time.Millisecond
+	cli := setupTestClient(cConn)
 
 	go func() {
 		dec := json.NewDecoder(sConn)
 		var req protocol.JSONRPCRequest
 		if err := dec.Decode(&req); err != nil {
-			t.Fatalf("server failed to decode request: %v", err)
 			return
 		}
 
@@ -37,7 +81,6 @@ func TestCallDecodesChunkedResponse(t *testing.T) {
 
 		payload, err := json.Marshal(resp)
 		if err != nil {
-			t.Fatalf("server failed to marshal response: %v", err)
 			return
 		}
 
@@ -66,15 +109,12 @@ func TestCallReturnsEmptyResultError(t *testing.T) {
 		_ = sConn.Close()
 	})
 
-	cli := New("unused")
-	cli.conn = cConn
-	cli.timeout = 500 * time.Millisecond
+	cli := setupTestClient(cConn)
 
 	go func() {
 		dec := json.NewDecoder(sConn)
 		var req protocol.JSONRPCRequest
 		if err := dec.Decode(&req); err != nil {
-			t.Fatalf("server failed to decode request: %v", err)
 			return
 		}
 
@@ -101,15 +141,12 @@ func TestInfoReturnsUnmarshalError(t *testing.T) {
 		_ = sConn.Close()
 	})
 
-	cli := New("unused")
-	cli.conn = cConn
-	cli.timeout = 500 * time.Millisecond
+	cli := setupTestClient(cConn)
 
 	go func() {
 		dec := json.NewDecoder(sConn)
 		var req protocol.JSONRPCRequest
 		if err := dec.Decode(&req); err != nil {
-			t.Fatalf("server failed to decode request: %v", err)
 			return
 		}
 

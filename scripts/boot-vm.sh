@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Tusk Boot Script - Boots Alpine VM from qcow2 disk
 # Usage: ./scripts/boot-vm.sh [--install] [--tuskd]
 

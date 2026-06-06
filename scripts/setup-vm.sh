@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Tusk VM Setup Script
 # Creates Alpine Linux qcow2 disk image with tuskd auto-start
 

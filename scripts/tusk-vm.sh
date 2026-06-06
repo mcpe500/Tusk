@@ -1,10 +1,10 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Tusk VM Management Script
 # Usage: ./scripts/tusk-vm.sh <command>
 
 set -e
 
-TUSK_DIR="$HOME/.tusk"
+TUSK_DIR="${TUSK_DIR:-$HOME/.tusk}"
 DISK_IMAGE="$TUSK_DIR/vm/disk.qcow2"
 ALPINE_ISO="$HOME/alpine-virt-3.19.1-x86_64.iso"
 QMP_SOCK="$TUSK_DIR/vm/qmp.sock"
@@ -36,10 +36,10 @@ cmd_status() {
 
     if [ -S "$QMP_SOCK" ]; then
         log "VM: Running"
-        python3 << 'EOF' 2>/dev/null
-import socket
+        python3 << EOF 2>/dev/null
+import socket, os
 s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-s.connect("/data/data/com.termux/files/home/.tusk/vm/qmp.sock")
+s.connect(os.path.expanduser("$QMP_SOCK"))
 s.recv(1024)
 s.send(b'{"execute":"qmp_capabilities","arguments":{},"id":1}\n')
 s.recv(1024)
@@ -84,14 +84,14 @@ cmd_start() {
     sleep 5
 
     # Try to ping
-    python3 << 'EOF' 2>/dev/null
-import socket, json, time
+    python3 << EOF 2>/dev/null
+import socket, json, time, os
 
 for i in range(30):
     try:
         s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         s.settimeout(1)
-        s.connect("/data/data/com.termux/files/home/.tusk/vm/serial.sock")
+        s.connect(os.path.expanduser("$SERIAL_SOCK"))
         s.sendall(json.dumps({"jsonrpc":"2.0","method":"Ping","params":{},"id":1}).encode() + b"\n")
         data = s.recv(1024)
         print("tuskd: OK")
@@ -175,11 +175,11 @@ cmd_attach() {
 
     log "Connecting to serial console... (Ctrl+C to detach)"
     exec socat - unix:"$SERIAL_SOCK" 2>/dev/null || \
-        python3 << 'EOF'
+        python3 << EOF
 import socket, os, termios, tty
 
 s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-s.connect("/data/data/com.termux/files/home/.tusk/vm/serial.sock")
+s.connect(os.path.expanduser("$SERIAL_SOCK"))
 
 # Simple read-only mode
 while True:

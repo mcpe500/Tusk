@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Tusk Pre-built Disk Installer
 # Downloads pre-made Alpine VM with tuskd pre-configured
 # No manual intervention needed!
@@ -161,7 +161,7 @@ start_vm() {
     # Wait for tuskd to respond
     log "Waiting for tuskd..."
 
-    for i in {1..30}; do
+    for i in {1..120}; do
         if ! kill -0 "$QEMU_PID" 2>/dev/null; then
             error "QEMU process exited before tuskd became ready"
             return 1
