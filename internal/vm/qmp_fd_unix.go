@@ -79,14 +79,15 @@ func SendFD(conn io.Writer, name string, fd int) error {
 		return fmt.Errorf("qmp syscall conn: %w", err)
 	}
 
-	return rawConn.Write(func(sfd uintptr) error {
-		sent, _, err := syscall.Sendmsg(int(sfd), payload, syscall.UnixRights(fd), nil, 0)
-		if err != nil {
-			return fmt.Errorf("sendmsg: %w", err)
-		}
-		if sent != len(payload) {
-			return fmt.Errorf("partial qmp fd message write: %d of %d", sent, len(payload))
-		}
-		return nil
-	})
+	var sendErr error
+	if err := rawConn.Write(func(sfd uintptr) bool {
+		sendErr = syscall.Sendmsg(int(sfd), payload, syscall.UnixRights(fd), nil, 0)
+		return true
+	}); err != nil {
+		return err
+	} else if sendErr != nil {
+		return fmt.Errorf("sendmsg: %w", sendErr)
+	}
+
+	return nil
 }

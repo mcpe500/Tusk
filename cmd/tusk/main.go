@@ -143,6 +143,19 @@ func runUpdate() {
 }
 
 func runInstall() {
+	installArgs := os.Args[2:]
+	verbose := false
+	scriptArgs := make([]string, 0, len(installArgs))
+
+	for _, arg := range installArgs {
+		switch arg {
+		case "--verbose", "-v":
+			verbose = true
+		default:
+			scriptArgs = append(scriptArgs, arg)
+		}
+	}
+
 	fmt.Println("Tusk Installer")
 	fmt.Println("")
 	fmt.Println("This will:")
@@ -152,10 +165,18 @@ func runInstall() {
 	fmt.Println("If download fails, it will build from scratch.")
 	fmt.Println("")
 
+	if verbose {
+		fmt.Println("Running with verbose logs enabled")
+	}
+
 	// Run the prebuilt-install script
 	scriptPath := filepath.Join(os.Getenv("HOME"), "Tusk", "scripts", "prebuilt-install.sh")
 
-	cmd := exec.Command("bash", scriptPath)
+	if verbose {
+		fmt.Printf("Executing: bash %s %s\n", scriptPath, strings.Join(scriptArgs, " "))
+	}
+
+	cmd := exec.Command("bash", append([]string{scriptPath}, scriptArgs...)...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
@@ -164,7 +185,10 @@ func runInstall() {
 		fmt.Fprintf(os.Stderr, "Pre-built download failed, trying build from scratch...\n")
 		// Fallback to auto-install
 		autoScript := filepath.Join(os.Getenv("HOME"), "Tusk", "scripts", "auto-install.sh")
-		cmd = exec.Command("bash", autoScript)
+		if verbose {
+			fmt.Printf("Executing: bash %s %s\n", autoScript, strings.Join(scriptArgs, " "))
+		}
+		cmd = exec.Command("bash", append([]string{autoScript}, scriptArgs...)...)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		cmd.Stdin = os.Stdin
@@ -173,6 +197,47 @@ func runInstall() {
 			os.Exit(1)
 		}
 	}
+
+	if err := verifyInstallation(verbose); err != nil {
+		fmt.Fprintf(os.Stderr, "Install verification failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Println("Tusk installed and ready.")
+}
+
+func verifyInstallation(verbose bool) error {
+	mgr := vm.New(tuskDir)
+
+	if verbose {
+		fmt.Println("Verifying tuskd socket and RPC readiness...")
+	}
+
+	conn, err := mgr.WaitForSerial(20 * time.Second)
+	if err != nil {
+		return fmt.Errorf("serial socket not available: %w", err)
+	}
+	if conn != nil {
+		if closeErr := conn.Close(); closeErr != nil && verbose {
+			fmt.Fprintf(os.Stderr, "Warning: failed to close serial probe connection: %v\n", closeErr)
+		}
+	}
+
+	client := client.New(mgr.SerialSocket())
+	if err := client.Connect(); err != nil {
+		return fmt.Errorf("failed to connect to tuskd: %w", err)
+	}
+	defer client.Close()
+
+	if err := client.Ping(); err != nil {
+		return fmt.Errorf("tuskd ping failed: %w", err)
+	}
+
+	if verbose {
+		fmt.Println("tuskd is responding over serial RPC")
+	}
+
+	return nil
 }
 
 func printUsage() {
@@ -181,7 +246,7 @@ func printUsage() {
 Usage:
   tusk version           Show version
   tusk update            Update Tusk to latest
-  tusk install           Download pre-built VM and start (no QEMU interaction)
+   tusk install [--verbose]  Download pre-built VM and start
   tusk init              Initialize Tusk storage
   tusk start             Start the Tusk VM
   tusk stop              Stop the Tusk VM

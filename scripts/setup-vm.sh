@@ -4,6 +4,9 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/lib/temp.sh"
+
 ALPINE_VERSION="3.19.1"
 ALPINE_ISO_URL="https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/releases/x86_64/alpine-virt-${ALPINE_VERSION}-x86_64.iso"
 ALPINE_ISO="$HOME/alpine-virt-${ALPINE_VERSION}-x86_64.iso"
@@ -117,7 +120,9 @@ setup_tuskd_service() {
     fi
 
     # Create OpenRC service script
-    cat > /tmp/tuskd.init << 'TUSKD_INIT'
+    init_script="$(tusk_temp_file "tuskd-init")"
+
+    cat > "$init_script" << 'TUSKD_INIT'
 #!/bin/sh
 # OpenRC init script for tuskd
 
@@ -152,7 +157,7 @@ stop() {
 TUSKD_INIT
 
     log "Created tuskd init script (copy to VM manually)"
-    log "Contents at: /tmp/tuskd.init"
+    log "Contents at: $init_script"
 }
 
 main() {

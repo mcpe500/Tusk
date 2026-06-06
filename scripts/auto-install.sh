@@ -11,6 +11,9 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/lib/temp.sh"
+
 log() { echo -e "${GREEN}[TUSK]${NC} $1"; }
 warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 error() { echo -e "${RED}[ERROR]${NC} $1"; }
@@ -21,9 +24,10 @@ DISK_IMAGE="$TUSK_DIR/vm/disk.qcow2"
 ALPINE_ISO="$HOME/alpine-virt-3.19.1-x86_64.iso"
 QMP_SOCK="$TUSK_DIR/vm/qmp.sock"
 SERIAL_SOCK="$TUSK_DIR/vm/serial.sock"
+INPUT_FIFO=""
 
 # Auto-answer file for setup-alpine
-ANSWERS_FILE="/tmp/tusk-alpine-answers"
+ANSWERS_FILE="$(tusk_temp_file "tusk-alpine-answers")"
 
 check_requirements() {
     log "Checking requirements..."
@@ -31,6 +35,11 @@ check_requirements() {
     # Check QEMU
     if ! command -v qemu-system-x86_64 &> /dev/null; then
         error "QEMU not found. Run: pkg install qemu-system-x86-64 qemu-utils"
+        exit 1
+    fi
+
+    if ! command -v qemu-img &> /dev/null; then
+        error "qemu-img not found. Run: pkg install qemu-utils"
         exit 1
     fi
 
@@ -92,6 +101,7 @@ cleanup() {
     pkill -f qemu 2>/dev/null || true
     rm -f "$QMP_SOCK" "$SERIAL_SOCK" 2>/dev/null || true
     rm -f "$ANSWERS_FILE" 2>/dev/null || true
+    rm -f "$INPUT_FIFO" 2>/dev/null || true
 }
 
 # Create answers file for setup-alpine
@@ -122,6 +132,11 @@ run_installer() {
     log "Starting Alpine installer..."
     log "This will take a few minutes. Please wait..."
 
+    if [ ! -f "$DISK_IMAGE" ] || [ ! -s "$DISK_IMAGE" ]; then
+        error "Disk image not found: $DISK_IMAGE"
+        return 1
+    fi
+
     cleanup
 
     # Wait for network
@@ -134,7 +149,7 @@ run_installer() {
     done
 
     # Create a named pipe for input
-    INPUT_FIFO="/tmp/tusk-install-input"
+    INPUT_FIFO="$(tusk_temp_fifo "tusk-install-input")"
     rm -f "$INPUT_FIFO"
     mkfifo "$INPUT_FIFO"
 
@@ -155,10 +170,19 @@ run_installer() {
     QEMU_PID=$!
 
     log "QEMU started (PID: $QEMU_PID)"
+    if ! kill -0 "$QEMU_PID" 2>/dev/null; then
+        error "QEMU exited before installation completed"
+        return 1
+    fi
 
     # Wait for serial socket to appear
     log "Waiting for serial socket..."
     for i in {1..30}; do
+        if ! kill -0 "$QEMU_PID" 2>/dev/null; then
+            log "QEMU process ended before serial socket available"
+            return 1
+        fi
+
         if [ -S "$SERIAL_SOCK" ]; then
             break
         fi
@@ -198,10 +222,15 @@ run_installer() {
         echo "Still installing... ($ELAPSED/${INSTALL_TIMEOUT}s)"
     done
 
-    # Force kill QEMU if still running
-    if kill -0 $QEMU_PID 2>/dev/null; then
+    if ! kill -0 $QEMU_PID 2>/dev/null; then
+        if [ "$ELAPSED" -lt 120 ]; then
+            error "QEMU exited too early before installation could finish"
+            return 1
+        fi
+    else
         warn "Installation taking too long, forcing shutdown..."
         kill -9 $QEMU_PID 2>/dev/null || true
+        return 1
     fi
 
     cleanup
@@ -211,6 +240,11 @@ run_installer() {
 
 configure_vm() {
     log "Configuring VM with tuskd..."
+
+    if [ ! -f "$DISK_IMAGE" ] || [ ! -s "$DISK_IMAGE" ]; then
+        error "Disk image not found: $DISK_IMAGE"
+        return 1
+    fi
 
     cleanup
 
@@ -228,8 +262,16 @@ configure_vm() {
         -serial unix:"$SERIAL_SOCK",server,nowait &
 
     VM_PID=$!
+    if ! kill -0 "$VM_PID" 2>/dev/null; then
+        error "QEMU exited before configuration started"
+        return 1
+    fi
 
     log "VM started for configuration (PID: $VM_PID)"
+
+    if [ ! -S "$SERIAL_SOCK" ]; then
+        warn "Serial socket did not appear; configuration may fail"
+    fi
 
     # Wait for boot
     log "Waiting for VM to boot..."
@@ -339,6 +381,11 @@ CONFIG_SCRIPT
 start_vm() {
     log "Starting Tusk VM..."
 
+    if [ ! -f "$DISK_IMAGE" ] || [ ! -s "$DISK_IMAGE" ]; then
+        error "Disk image not found: $DISK_IMAGE"
+        return 1
+    fi
+
     cleanup
 
     qemu-system-x86_64 \
@@ -353,16 +400,29 @@ start_vm() {
         -qmp unix:"$QMP_SOCK",server,nowait \
         -serial unix:"$SERIAL_SOCK",server,nowait &
 
-    log "VM started (PID: $!)"
+    VM_PID=$!
+    if ! kill -0 "$VM_PID" 2>/dev/null; then
+        error "QEMU exited before vm started"
+        return 1
+    fi
+
+    log "VM started (PID: $VM_PID)"
     sleep 5
 
     # Test tuskd
     if [ -S "$SERIAL_SOCK" ]; then
         log "Testing tuskd..."
-        echo '{"jsonrpc":"2.0","method":"Ping","params":{},"id":1}' | \
-            nc -N "$SERIAL_SOCK" -w 2 | head -1 && log "tuskd responding!" || \
-            warn "tuskd not responding yet (VM may still be booting)"
+        if echo '{"jsonrpc":"2.0","method":"Ping","params":{},"id":1}' | \
+            nc -N "$SERIAL_SOCK" -w 2 | grep -q "pong\|result"; then
+            log "tuskd responding!"
+            return 0
+        fi
+        warn "tuskd not responding yet (VM may still be booting)"
+        return 1
     fi
+
+    warn "tuskd not responding"
+    return 1
 }
 
 main() {
@@ -389,9 +449,9 @@ main() {
     echo "No manual intervention needed!"
     echo ""
 
-    run_installer
-    configure_vm
-    start_vm
+    run_installer || exit 1
+    configure_vm || exit 1
+    start_vm || exit 1
 
     echo ""
     echo "============================================"

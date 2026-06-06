@@ -11,6 +11,9 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/lib/temp.sh"
+
 log() { echo -e "${GREEN}[TUSK]${NC} $1"; }
 warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 error() { echo -e "${RED}[ERROR]${NC} $1"; }
@@ -30,6 +33,12 @@ check_requirements() {
     if ! command -v qemu-system-x86_64 &> /dev/null; then
         error "QEMU not found"
         echo "Run: pkg install qemu-system-x86-64 qemu-utils"
+        exit 1
+    fi
+
+    if ! command -v qemu-img &> /dev/null; then
+        error "qemu-img not found"
+        echo "Run: pkg install qemu-utils"
         exit 1
     fi
 
@@ -76,7 +85,7 @@ download_disk() {
     info "Downloading from: $DISK_URL"
 
     # Download with progress
-    TEMP_FILE="/tmp/tusk-disk.gz"
+    TEMP_FILE="$(tusk_temp_file "tusk-disk" ".gz")"
 
     curl -L -o "$TEMP_FILE" --progress-bar "$DISK_URL"
 
@@ -123,6 +132,11 @@ start_vm() {
     # Clean up sockets
     rm -f "$TUSK_DIR/vm/qmp.sock" "$TUSK_DIR/vm/serial.sock" 2>/dev/null || true
 
+    if [ ! -f "$DISK_IMAGE" ] || [ ! -s "$DISK_IMAGE" ]; then
+        error "Disk image missing or empty: $DISK_IMAGE"
+        return 1
+    fi
+
     qemu-system-x86_64 \
         -M pc-i440fx-9.2 \
         -m 512 \
@@ -135,13 +149,24 @@ start_vm() {
         -qmp unix:"$TUSK_DIR/vm/qmp.sock",server,nowait \
         -serial unix:"$TUSK_DIR/vm/serial.sock",server,nowait &
 
-    log "VM started (PID: $!)"
+    QEMU_PID=$!
+    if ! kill -0 "$QEMU_PID" 2>/dev/null; then
+        error "Failed to start QEMU"
+        return 1
+    fi
+
+    log "VM started (PID: $QEMU_PID)"
     sleep 5
 
     # Wait for tuskd to respond
     log "Waiting for tuskd..."
 
     for i in {1..30}; do
+        if ! kill -0 "$QEMU_PID" 2>/dev/null; then
+            error "QEMU process exited before tuskd became ready"
+            return 1
+        fi
+
         if [ -S "$TUSK_DIR/vm/serial.sock" ]; then
             RESPONSE=$(echo '{"jsonrpc":"2.0","method":"Ping","params":{},"id":1}' | \
                 nc -N "$TUSK_DIR/vm/serial.sock" -w 2 2>/dev/null)
@@ -153,8 +178,8 @@ start_vm() {
         sleep 1
     done
 
-    warn "tuskd not responding yet, but VM started"
-    return 0
+    warn "tuskd not responding"
+    return 1
 }
 
 test_installation() {
@@ -169,10 +194,15 @@ test_installation() {
     if [ -S "$TUSK_DIR/vm/serial.sock" ]; then
         RESPONSE=$(echo '{"jsonrpc":"2.0","method":"Info","params":{},"id":1}' | \
             nc -N "$TUSK_DIR/vm/serial.sock" -w 2 2>/dev/null)
-        if echo "$RESPONSE" | grep -q "version"; then
+        if echo "$RESPONSE" | grep -q "result"; then
             log "tuskd OK"
+            return 0
         fi
+        warn "Unexpected tuskd response: $RESPONSE"
     fi
+
+    error "tuskd not responding"
+    return 1
 }
 
 usage() {
@@ -220,12 +250,12 @@ main() {
         info "Building from scratch (this may take a while)..."
         # Fallback: run auto-install script
         if [ -f "$TUSK_REPO/scripts/auto-install.sh" ]; then
-            bash "$TUSK_REPO/scripts/auto-install.sh"
+            bash "$TUSK_REPO/scripts/auto-install.sh" || exit 1
         else
             error "Auto-install script not found"
             exit 1
         fi
-        exit 0
+        return
     fi
 
     if [ "$FORCE" = true ]; then
@@ -241,8 +271,20 @@ main() {
     fi
 
     build_tuskd
-    start_vm
-    test_installation
+
+    if [ "$BUILD_SCRATCH" = true ]; then
+        info "Falling back to auto-install"
+        if [ -f "$TUSK_REPO/scripts/auto-install.sh" ]; then
+            bash "$TUSK_REPO/scripts/auto-install.sh" || exit 1
+        else
+            error "Auto-install script not found"
+            exit 1
+        fi
+        return
+    fi
+
+    start_vm || exit 1
+    test_installation || exit 1
 
     echo ""
     echo "============================================"
