@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -40,25 +41,30 @@ func (c *SerialClient) Send(method string, params interface{}) ([]byte, error) {
 		req["params"] = params
 	}
 
-	data, err := json.Marshal(req)
-	if err != nil {
-		return nil, fmt.Errorf("marshal request: %w", err)
+	if err := c.conn.SetWriteDeadline(time.Now().Add(c.timeout)); err != nil {
+		return nil, fmt.Errorf("set write deadline: %w", err)
 	}
-	data = append(data, '\n')
 
-	if _, err := c.conn.Write(data); err != nil {
+	enc := json.NewEncoder(c.conn)
+	if err := enc.Encode(req); err != nil {
 		return nil, fmt.Errorf("send request: %w", err)
 	}
 
-	// Read response
-	c.conn.SetDeadline(time.Now().Add(c.timeout))
-	resp := make([]byte, 4096)
-	n, err := c.conn.Read(resp)
-	if err != nil {
-		return nil, fmt.Errorf("read response: %w", err)
+	if err := c.conn.SetReadDeadline(time.Now().Add(c.timeout)); err != nil {
+		return nil, fmt.Errorf("set read deadline: %w", err)
 	}
 
-	return resp[:n], nil
+	// Read response
+	dec := json.NewDecoder(c.conn)
+	var resp json.RawMessage
+	if err := dec.Decode(&resp); err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+	if len(bytes.TrimSpace(resp)) == 0 {
+		return nil, fmt.Errorf("empty rpc response")
+	}
+
+	return resp, nil
 }
 
 func (c *SerialClient) Ping() error {
@@ -73,6 +79,9 @@ func (c *SerialClient) Info() (map[string]interface{}, error) {
 	}
 
 	var resp map[string]interface{}
+	if len(bytes.TrimSpace(data)) == 0 {
+		return nil, fmt.Errorf("empty info response")
+	}
 	if err := json.Unmarshal(data, &resp); err != nil {
 		return nil, fmt.Errorf("unmarshal info: %w", err)
 	}

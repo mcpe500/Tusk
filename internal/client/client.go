@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -58,34 +59,45 @@ func (c *Client) call(method string, params interface{}) (json.RawMessage, error
 		req.Params = data
 	}
 
-	reqData, err := json.Marshal(req)
-	if err != nil {
-		return nil, fmt.Errorf("marshal request: %w", err)
+	if err := c.conn.SetWriteDeadline(time.Now().Add(c.timeout)); err != nil {
+		return nil, fmt.Errorf("set write deadline: %w", err)
 	}
-	reqData = append(reqData, '\n')
 
-	if _, err := c.conn.Write(reqData); err != nil {
+	enc := json.NewEncoder(c.conn)
+	if err := enc.Encode(req); err != nil {
 		return nil, fmt.Errorf("send: %w", err)
 	}
 
-	// Read response
-	c.conn.SetDeadline(time.Now().Add(c.timeout))
-	respData := make([]byte, 65536)
-	n, err := c.conn.Read(respData)
-	if err != nil {
-		return nil, fmt.Errorf("read: %w", err)
+	if err := c.conn.SetReadDeadline(time.Now().Add(c.timeout)); err != nil {
+		return nil, fmt.Errorf("set read deadline: %w", err)
 	}
 
 	var resp protocol.JSONRPCResponse
-	if err := json.Unmarshal(respData[:n], &resp); err != nil {
-		return nil, fmt.Errorf("unmarshal: %w", err)
+	dec := json.NewDecoder(c.conn)
+	if err := dec.Decode(&resp); err != nil {
+		return nil, fmt.Errorf("read: %w", err)
 	}
-
+	if resp.JSONRPC != "" && resp.JSONRPC != "2.0" {
+		return nil, fmt.Errorf("invalid jsonrpc: %s", resp.JSONRPC)
+	}
 	if resp.Error != nil {
 		return nil, fmt.Errorf("rpc error %d: %s", resp.Error.Code, resp.Error.Message)
 	}
+	if len(bytes.TrimSpace(resp.Result)) == 0 {
+		return nil, fmt.Errorf("empty rpc result")
+	}
 
 	return resp.Result, nil
+}
+
+func unmarshalResult(method string, raw json.RawMessage, target any) error {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return fmt.Errorf("%s: empty result", method)
+	}
+	if err := json.Unmarshal(raw, target); err != nil {
+		return fmt.Errorf("%s: %w", method, err)
+	}
+	return nil
 }
 
 func (c *Client) Ping() error {
@@ -99,7 +111,7 @@ func (c *Client) Info() (*InfoResult, error) {
 		return nil, err
 	}
 	var result InfoResult
-	if err := json.Unmarshal(data, &result); err != nil {
+	if err := unmarshalResult("info", data, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
@@ -111,7 +123,7 @@ func (c *Client) ContainerCreate(params *protocol.ContainerCreateParams) (*proto
 		return nil, err
 	}
 	var result protocol.ContainerCreateResult
-	if err := json.Unmarshal(data, &result); err != nil {
+	if err := unmarshalResult("container-create", data, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
@@ -125,7 +137,7 @@ func (c *Client) ContainerList(all bool) ([]protocol.ContainerInfo, error) {
 	var result struct {
 		Containers []protocol.ContainerInfo `json:"containers"`
 	}
-	if err := json.Unmarshal(data, &result); err != nil {
+	if err := unmarshalResult("container-list", data, &result); err != nil {
 		return nil, err
 	}
 	return result.Containers, nil
@@ -149,13 +161,13 @@ func (c *Client) ContainerRemove(id string, force bool) error {
 func (c *Client) ContainerExec(id string, cmd []string) (*protocol.ContainerExecResult, error) {
 	data, err := c.call("ContainerExec", protocol.ContainerExecParams{
 		ContainerID: id,
-		Command:    cmd,
+		Command:     cmd,
 	})
 	if err != nil {
 		return nil, err
 	}
 	var result protocol.ContainerExecResult
-	if err := json.Unmarshal(data, &result); err != nil {
+	if err := unmarshalResult("container-exec", data, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
@@ -169,7 +181,7 @@ func (c *Client) ContainerLogs(id string) (string, error) {
 	var result struct {
 		Logs string `json:"logs"`
 	}
-	if err := json.Unmarshal(data, &result); err != nil {
+	if err := unmarshalResult("container-logs", data, &result); err != nil {
 		return "", err
 	}
 	return result.Logs, nil
@@ -188,7 +200,7 @@ func (c *Client) ImageList() ([]ImageInfo, error) {
 	var result struct {
 		Images []ImageInfo `json:"images"`
 	}
-	if err := json.Unmarshal(data, &result); err != nil {
+	if err := unmarshalResult("image-list", data, &result); err != nil {
 		return nil, err
 	}
 	return result.Images, nil
@@ -207,24 +219,24 @@ func (c *Client) NetworkList() ([]NetworkInfo, error) {
 	var result struct {
 		Networks []NetworkInfo `json:"networks"`
 	}
-	if err := json.Unmarshal(data, &result); err != nil {
+	if err := unmarshalResult("network-list", data, &result); err != nil {
 		return nil, err
 	}
 	return result.Networks, nil
 }
 
 type InfoResult struct {
-	Version   string `json:"version"`
+	Version    string `json:"version"`
 	APIVersion string `json:"apiVersion"`
-	OS        string `json:"os"`
-	Arch      string `json:"arch"`
+	OS         string `json:"os"`
+	Arch       string `json:"arch"`
 }
 
 type ImageInfo struct {
-	ID       string `json:"id"`
-	Tags     []string `json:"tags"`
-	Size     int64  `json:"size"`
-	Created  string `json:"created"`
+	ID      string   `json:"id"`
+	Tags    []string `json:"tags"`
+	Size    int64    `json:"size"`
+	Created string   `json:"created"`
 }
 
 type NetworkInfo struct {
