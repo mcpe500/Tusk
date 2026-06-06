@@ -139,11 +139,21 @@ func handleConnection(conn net.Conn, store *ContainerStore) {
 			return
 		}
 
-		method, _ := req["method"].(string)
+		jsonrpc := req["jsonrpc"]
+		if v, ok := jsonrpc.(string); ok && v != "2.0" {
+			writeJSONRPCError(enc, req["id"], -32600, "invalid request: jsonrpc must be 2.0")
+			continue
+		}
+
+		method, ok := req["method"].(string)
+		if !ok || strings.TrimSpace(method) == "" {
+			writeJSONRPCError(enc, req["id"], -32600, "invalid request: method is missing or not a string")
+			continue
+		}
+
 		id := req["id"]
 
-		var resp map[string]interface{}
-		resp = map[string]interface{}{
+		resp := map[string]interface{}{
 			"jsonrpc": "2.0",
 			"id":      id,
 		}
@@ -163,43 +173,85 @@ func handleConnection(conn net.Conn, store *ContainerStore) {
 				"containers": store.List(),
 			}
 		case "ContainerCreate":
-			params := req["params"].(map[string]interface{})
+			params, ok := reqParams(req)
+			if !ok {
+				resp["error"] = errorObject(-32602, "invalid params")
+				break
+			}
+			image := strings.TrimSpace(getStringOrDefault(params["image"]))
+			if image == "" {
+				resp["error"] = errorObject(-32602, "invalid params: image is required")
+				break
+			}
 			c := &types.ContainerInfo{
 				ID:    generateID(),
-				Name:  params["name"].(string),
-				Image: params["image"].(string),
+				Name:  getStringOrDefault(params["name"]),
+				Image: image,
 			}
-			if cmd, ok := params["command"].([]interface{}); ok {
-				for _, v := range cmd {
-					c.Cmd = append(c.Cmd, v.(string))
+			if rawCmd, exists := params["command"]; exists {
+				cmd, err := asStringSlice(rawCmd)
+				if err != nil {
+					resp["error"] = errorObject(-32602, "invalid params: command must be []string")
+					break
 				}
+				c.Cmd = cmd
 			}
-			if env, ok := params["env"].([]interface{}); ok {
-				for _, v := range env {
-					c.Env = append(c.Env, v.(string))
+			if rawEnv, exists := params["env"]; exists {
+				env, err := asStringSlice(rawEnv)
+				if err != nil {
+					resp["error"] = errorObject(-32602, "invalid params: env must be []string")
+					break
 				}
+				c.Env = env
 			}
 			store.Create(c)
 			resp["result"] = c
 		case "ContainerStart":
-			params := req["params"].(map[string]interface{})
-			id := params["id"].(string)
-			store.Start(id)
+			params, ok := reqParams(req)
+			if !ok {
+				resp["error"] = errorObject(-32602, "invalid params")
+				break
+			}
+			idStr, ok := params["id"].(string)
+			if !ok {
+				resp["error"] = errorObject(-32602, "invalid params: id is required")
+				break
+			}
+			store.Start(idStr)
 			resp["result"] = map[string]string{"status": "started"}
 		case "ContainerStop":
-			params := req["params"].(map[string]interface{})
-			id := params["id"].(string)
-			store.Stop(id)
+			params, ok := reqParams(req)
+			if !ok {
+				resp["error"] = errorObject(-32602, "invalid params")
+				break
+			}
+			idStr, ok := params["id"].(string)
+			if !ok {
+				resp["error"] = errorObject(-32602, "invalid params: id is required")
+				break
+			}
+			store.Stop(idStr)
 			resp["result"] = map[string]string{"status": "stopped"}
 		case "ContainerExec":
-			params := req["params"].(map[string]interface{})
-			containerID := params["containerId"].(string)
+			params, ok := reqParams(req)
+			if !ok {
+				resp["error"] = errorObject(-32602, "invalid params")
+				break
+			}
+			containerID, ok := params["containerId"].(string)
 			_ = containerID // TODO: use for actual container lookup
 			var cmd []string
-			if cmdList, ok := params["command"].([]interface{}); ok {
-				for _, v := range cmdList {
-					cmd = append(cmd, v.(string))
+			if !ok {
+				resp["error"] = errorObject(-32602, "invalid params: containerId is required")
+				break
+			}
+			if rawCmd, exists := params["command"]; exists {
+				cmdParsed, err := asStringSlice(rawCmd)
+				if err != nil {
+					resp["error"] = errorObject(-32602, "invalid params: command must be []string")
+					break
 				}
+				cmd = cmdParsed
 			}
 
 			// Execute the command in the container
@@ -228,14 +280,30 @@ func handleConnection(conn net.Conn, store *ContainerStore) {
 				"stderr":   stderr,
 			}
 		case "ContainerRemove":
-			params := req["params"].(map[string]interface{})
-			id := params["id"].(string)
-			store.Remove(id)
+			params, ok := reqParams(req)
+			if !ok {
+				resp["error"] = errorObject(-32602, "invalid params")
+				break
+			}
+			idStr, ok := params["id"].(string)
+			if !ok {
+				resp["error"] = errorObject(-32602, "invalid params: id is required")
+				break
+			}
+			store.Remove(idStr)
 			resp["result"] = map[string]string{"status": "removed"}
 		case "ContainerLogs":
-			params := req["params"].(map[string]interface{})
-			id := params["id"].(string)
-			logs := store.Logs(id)
+			params, ok := reqParams(req)
+			if !ok {
+				resp["error"] = errorObject(-32602, "invalid params")
+				break
+			}
+			idStr, ok := params["id"].(string)
+			if !ok {
+				resp["error"] = errorObject(-32602, "invalid params: id is required")
+				break
+			}
+			logs := store.Logs(idStr)
 			resp["result"] = map[string]string{"logs": logs}
 		case "ImagePull":
 			// Would download image from registry
@@ -245,10 +313,19 @@ func handleConnection(conn net.Conn, store *ContainerStore) {
 				"images": []types.ImageInfo{},
 			}
 		case "NetworkCreate":
-			params := req["params"].(map[string]interface{})
+			params, ok := reqParams(req)
+			if !ok {
+				resp["error"] = errorObject(-32602, "invalid params")
+				break
+			}
+			name := getStringOrDefault(params["name"])
+			if strings.TrimSpace(name) == "" {
+				resp["error"] = errorObject(-32602, "invalid params: name is required")
+				break
+			}
 			resp["result"] = map[string]string{
 				"id":   generateID(),
-				"name": params["name"].(string),
+				"name": name,
 			}
 		case "NetworkList":
 			resp["result"] = map[string]interface{}{
@@ -263,6 +340,66 @@ func handleConnection(conn net.Conn, store *ContainerStore) {
 
 		enc.Encode(resp)
 	}
+}
+
+func writeJSONRPCError(enc *json.Encoder, id interface{}, code int, message string) {
+	enc.Encode(map[string]interface{}{
+		"jsonrpc": "2.0",
+		"id":      id,
+		"error":   errorObject(code, message),
+	})
+}
+
+func errorObject(code int, message string) map[string]interface{} {
+	return map[string]interface{}{
+		"code":    code,
+		"message": message,
+	}
+}
+
+func reqParams(req map[string]interface{}) (map[string]interface{}, bool) {
+	raw, ok := req["params"]
+	if !ok || raw == nil {
+		return map[string]interface{}{}, true
+	}
+	params, ok := raw.(map[string]interface{})
+	if !ok {
+		return nil, false
+	}
+	return params, true
+}
+
+func asStringSlice(value interface{}) ([]string, error) {
+	if value == nil {
+		return nil, nil
+	}
+
+	switch v := value.(type) {
+	case []interface{}:
+		result := make([]string, 0, len(v))
+		for _, item := range v {
+			s, ok := item.(string)
+			if !ok {
+				return nil, fmt.Errorf("value is not a string")
+			}
+			result = append(result, s)
+		}
+		return result, nil
+	case []string:
+		return append([]string(nil), v...), nil
+	default:
+		return nil, fmt.Errorf("value is not an array")
+	}
+}
+
+func getStringOrDefault(value interface{}) string {
+	if value == nil {
+		return ""
+	}
+	if s, ok := value.(string); ok {
+		return s
+	}
+	return ""
 }
 
 type ContainerStore struct {

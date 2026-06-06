@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -47,6 +48,11 @@ func (s *Store) blobPath(digest string) string {
 	return filepath.Join(s.baseDir, "blobs", parts[0], parts[1])
 }
 
+func (s *Store) manifestIndexPath(ref string) string {
+	refHash := sha1.Sum([]byte(ref))
+	return filepath.Join(s.baseDir, "index", hex.EncodeToString(refHash[:])+".txt")
+}
+
 func (s *Store) SaveBlob(digest string, data []byte) error {
 	path := s.blobPath(digest)
 	if path == "" {
@@ -84,7 +90,16 @@ func (s *Store) SaveManifest(ref string, manifest Manifest) error {
 		return err
 	}
 
-	return os.WriteFile(path, data, 0644)
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return err
+	}
+
+	indexPath := s.manifestIndexPath(ref)
+	if err := os.MkdirAll(filepath.Dir(indexPath), 0755); err != nil {
+		return err
+	}
+
+	return os.WriteFile(indexPath, []byte(digest), 0644)
 }
 
 func (s *Store) GetManifest(digest string) (*Manifest, error) {
@@ -101,11 +116,45 @@ func (s *Store) GetManifest(digest string) (*Manifest, error) {
 	return &m, nil
 }
 
+func (s *Store) ResolveManifestRef(ref string) (string, error) {
+	if strings.HasPrefix(ref, "sha256:") {
+		return ref, nil
+	}
+
+	if at := strings.Index(ref, "@"); at != -1 {
+		digest := ref[at+1:]
+		if strings.HasPrefix(digest, "sha256:") {
+			return digest, nil
+		}
+	}
+
+	path := s.manifestIndexPath(ref)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("manifest index missing for %q: %w", ref, err)
+	}
+
+	digest := strings.TrimSpace(string(data))
+	if !strings.HasPrefix(digest, "sha256:") {
+		return "", fmt.Errorf("invalid manifest digest %q for %q", digest, ref)
+	}
+
+	return digest, nil
+}
+
+func (s *Store) GetManifestByRef(ref string) (*Manifest, error) {
+	digest, err := s.ResolveManifestRef(ref)
+	if err != nil {
+		return nil, err
+	}
+	return s.GetManifest(digest)
+}
+
 type Manifest struct {
-	SchemaVersion int              `json:"schemaVersion"`
-	MediaType     string           `json:"mediaType,omitempty"`
-	Config        Descriptor       `json:"config"`
-	Layers        []Descriptor     `json:"layers"`
+	SchemaVersion int          `json:"schemaVersion"`
+	MediaType     string       `json:"mediaType,omitempty"`
+	Config        Descriptor   `json:"config"`
+	Layers        []Descriptor `json:"layers"`
 }
 
 type Descriptor struct {

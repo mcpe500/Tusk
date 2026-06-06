@@ -1,6 +1,6 @@
 # Binaries
-tusk
-tuskd
+/tusk
+/tuskd
 *.exe
 
 # Build artifacts
@@ -47,3 +47,6 @@ coverage.html
 tmp/
 temp/
 *.tmp
+
+# opencode session state
+.opencode/

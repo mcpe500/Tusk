@@ -15,15 +15,15 @@ import (
 )
 
 type Runtime struct {
-	store     *image.Store
-	tuskDir   string
+	store        *image.Store
+	tuskDir      string
 	containerDir string
 }
 
 func New(tuskDir string) *Runtime {
 	return &Runtime{
-		store:       image.New(filepath.Join(tuskDir, "images")),
-		tuskDir:     tuskDir,
+		store:        image.New(filepath.Join(tuskDir, "images")),
+		tuskDir:      tuskDir,
 		containerDir: filepath.Join(tuskDir, "containers"),
 	}
 }
@@ -35,14 +35,27 @@ func (r *Runtime) Init() error {
 // PrepareRootfs extracts image layers to create container root filesystem
 func (r *Runtime) PrepareRootfs(containerID, imageRef string) (string, error) {
 	rootfsDir := filepath.Join(r.containerDir, containerID, "rootfs")
+	if err := os.RemoveAll(rootfsDir); err != nil {
+		return "", fmt.Errorf("clean rootfs dir: %w", err)
+	}
 	if err := os.MkdirAll(rootfsDir, 0755); err != nil {
 		return "", fmt.Errorf("create rootfs dir: %w", err)
 	}
 
-	// TODO: Look up image manifest from store
-	// For now, this is a placeholder - the actual implementation
-	// would extract layers from the OCI image
-	_ = imageRef
+	manifest, err := r.store.GetManifestByRef(imageRef)
+	if err != nil {
+		return "", fmt.Errorf("resolve manifest for image %s: %w", imageRef, err)
+	}
+
+	for _, layer := range manifest.Layers {
+		if err := r.store.ExtractLayer(layer.Digest, rootfsDir); err != nil {
+			return "", fmt.Errorf("extract layer %s: %w", layer.Digest, err)
+		}
+	}
+
+	if err := ApplyWhiteouts(rootfsDir); err != nil {
+		return "", fmt.Errorf("apply whiteouts: %w", err)
+	}
 
 	return rootfsDir, nil
 }

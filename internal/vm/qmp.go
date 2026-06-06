@@ -3,7 +3,6 @@ package vm
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"net"
 	"time"
 )
@@ -58,12 +57,12 @@ func (c *QMPClient) Read() (*QMPMessage, error) {
 }
 
 func (c *QMPClient) Execute(cmd string, args map[string]interface{}) (json.RawMessage, error) {
-	id := time.Now().UnixNano()
+	id := fmt.Sprintf("%d", time.Now().UnixNano())
 
 	req := map[string]interface{}{
-		"execute": cmd,
+		"execute":   cmd,
 		"arguments": args,
-		"id": id,
+		"id":        id,
 	}
 
 	enc := json.NewEncoder(c.conn)
@@ -77,7 +76,10 @@ func (c *QMPClient) Execute(cmd string, args map[string]interface{}) (json.RawMe
 		if err != nil {
 			return nil, err
 		}
-		if msg.Id == id {
+		if msg.Type == "event" {
+			continue
+		}
+		if fmt.Sprintf("%v", msg.Id) == id {
 			if msg.Error != nil {
 				return nil, fmt.Errorf("qmp error: %s - %s", msg.Error.Class, msg.Error.Desc)
 			}
@@ -151,14 +153,4 @@ func (c *QMPClient) QueryStatus() (string, error) {
 		}
 	}
 	return "stopped", nil
-}
-
-func (c *QMPClient) AddFD(fd int, name string) error {
-	// For file descriptor passing (used in virtio-serial)
-	return fmt.Errorf("not implemented")
-}
-
-func SendFD(conn io.Writer, name string, fd int) error {
-	// Implementation for sending file descriptors via SCM_RIGHTS
-	return fmt.Errorf("not implemented")
 }

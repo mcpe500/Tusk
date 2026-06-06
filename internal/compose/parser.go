@@ -4,7 +4,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 
+	"github.com/tusk/tusk/internal/client"
+	"github.com/tusk/tusk/pkg/protocol"
 	"github.com/tusk/tusk/pkg/types"
 	"gopkg.in/yaml.v3"
 )
@@ -30,17 +34,17 @@ func (p *Parser) Parse(path string) (*types.ComposeSpec, error) {
 }
 
 type Orchestrator struct {
-	spec     *types.ComposeSpec
+	spec        *types.ComposeSpec
 	projectName string
-	workDir  string
+	workDir     string
 }
 
 func NewOrchestrator(spec *types.ComposeSpec, workDir string) *Orchestrator {
 	name := filepath.Base(workDir)
 	return &Orchestrator{
-		spec:         spec,
-		projectName:  name,
-		workDir:      workDir,
+		spec:        spec,
+		projectName: name,
+		workDir:     workDir,
 	}
 }
 
@@ -110,38 +114,159 @@ func (o *Orchestrator) createVolume(name string, vol types.Volume) error {
 }
 
 func (o *Orchestrator) startServices() error {
-	// Simple: start all services
-	for name, svc := range o.spec.Services {
-		if svc.Image != "" {
-			fmt.Printf("Starting service: %s (image: %s)\n", name, svc.Image)
-		} else if svc.Build != nil {
-			fmt.Printf("Starting service: %s (build: %s/%s)\n", name, svc.Build.Context, svc.Build.Dockerfile)
+	order, err := o.resolveServiceOrder()
+	if err != nil {
+		return err
+	}
+
+	daemonPath := filepath.Join(os.Getenv("HOME"), ".tusk", "vm", "serial.sock")
+	cli := client.New(daemonPath)
+	if err := cli.Connect(); err != nil {
+		return fmt.Errorf("connect tuskd: %w", err)
+	}
+	defer cli.Close()
+
+	for _, name := range order {
+		svc := o.spec.Services[name]
+
+		if svc.Image == "" {
+			if svc.Build != nil {
+				return fmt.Errorf("service %s requires build support, not yet implemented", name)
+			}
+			fmt.Printf("Skipping service %s: no image configured\n", name)
+			continue
 		}
 
-		// Show ports
-		for _, port := range svc.Ports {
-			fmt.Printf("  port: %s\n", port)
-		}
+		fmt.Printf("Starting service: %s (image: %s)\n", name, svc.Image)
 
-		// Show environment
-		for _, env := range svc.Environment {
-			fmt.Printf("  env: %s\n", env)
-		}
-
-		// Show volumes
-		for _, vol := range svc.Volumes {
-			fmt.Printf("  volume: %s\n", vol)
-		}
-
-		// Check dependencies (just log them for now)
 		for _, dep := range svc.DependsOn {
 			fmt.Printf("  depends on: %s\n", dep)
 		}
 
-		fmt.Println("")
-		// TODO: Actually create and start containers via tuskd
+		containerName := svc.ContainerName
+		if containerName == "" {
+			containerName = fmt.Sprintf("%s-%s", o.projectName, name)
+		}
+
+		cmd := svc.ParseCommand()
+		if len(cmd) == 0 {
+			fmt.Println("  command: default")
+		} else {
+			fmt.Printf("  command: %s\n", strings.Join(cmd, " "))
+		}
+
+		params := &protocol.ContainerCreateParams{
+			Image:   svc.Image,
+			Name:    containerName,
+			Command: cmd,
+			Env:     mergeServiceEnv(svc.Environment, svc.EnvFile, o.workDir),
+		}
+
+		if len(svc.Networks) > 0 {
+			params.Network = svc.Networks[0]
+		}
+
+		result, err := cli.ContainerCreate(params)
+		if err != nil {
+			return fmt.Errorf("failed to create service %s: %w", name, err)
+		}
+
+		if err := cli.ContainerStart(result.ID); err != nil {
+			return fmt.Errorf("failed to start service %s: %w", name, err)
+		}
+
+		id := result.ID
+		if len(id) > 12 {
+			id = id[:12]
+		}
+		fmt.Printf("  started: %s\n\n", id)
 	}
+
 	return nil
+}
+
+func (o *Orchestrator) resolveServiceOrder() ([]string, error) {
+	state := make(map[string]int)
+	order := make([]string, 0, len(o.spec.Services))
+
+	var visit func(string) error
+	visit = func(name string) error {
+		if state[name] == 1 {
+			return fmt.Errorf("dependency cycle at service %s", name)
+		}
+		if state[name] == 2 {
+			return nil
+		}
+
+		svc, ok := o.spec.Services[name]
+		if !ok {
+			return fmt.Errorf("unknown dependency: %s", name)
+		}
+
+		state[name] = 1
+		for _, dep := range svc.DependsOn {
+			if _, ok := o.spec.Services[dep]; !ok {
+				return fmt.Errorf("service %s depends on unknown service %s", name, dep)
+			}
+			if err := visit(dep); err != nil {
+				return err
+			}
+		}
+		state[name] = 2
+		order = append(order, name)
+		return nil
+	}
+
+	names := make([]string, 0, len(o.spec.Services))
+	for name := range o.spec.Services {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	for _, name := range names {
+		if err := visit(name); err != nil {
+			return nil, err
+		}
+	}
+
+	return order, nil
+}
+
+func mergeServiceEnv(base []string, envFiles []string, workDir string) []string {
+	vars := map[string]string{}
+	for _, entry := range base {
+		parts := strings.SplitN(entry, "=", 2)
+		if len(parts) == 0 {
+			continue
+		}
+		key := parts[0]
+		value := ""
+		if len(parts) > 1 {
+			value = parts[1]
+		}
+		vars[key] = value
+	}
+
+	for _, envFile := range envFiles {
+		path := envFile
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(workDir, envFile)
+		}
+		data, err := ParseEnvFile(path)
+		if err != nil {
+			continue
+		}
+		for key, value := range data {
+			vars[key] = value
+		}
+	}
+
+	result := make([]string, 0, len(vars))
+	for key, value := range vars {
+		result = append(result, key+"="+value)
+	}
+
+	return result
 }
 
 func (o *Orchestrator) stopService(name string) error {
