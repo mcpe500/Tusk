@@ -5,15 +5,15 @@
 ### Software
 - **Termux** (Android 7.0+)
 - **QEMU** (x86_64 system emulator)
-- **Go** 1.18+ (untuk build dari source)
+- **Go** 1.18+ (for building from source)
 
-### Install QEMU di Termux
+### Install QEMU on Termux
 
 ```bash
 pkg install qemu-system-x86-64
 ```
 
-### Install Go di Termux (jika belum)
+### Install Go on Termux (if not already)
 
 ```bash
 pkg install golang
@@ -23,13 +23,13 @@ pkg install golang
 
 ### Method 1: Pre-built Binary (Coming Soon)
 
-Download binary dari GitHub Releases.
+Download the binary from GitHub Releases.
 
 ```bash
-# TODO: Tambahkan link releases saat tersedia
+# TODO: Add release link when available
 ```
 
-### Method 2: Build dari Source
+### Method 2: Build from Source
 
 ```bash
 # Clone repository
@@ -39,7 +39,7 @@ cd Tusk
 # Build CLI
 go build -o tusk ./cmd/tusk
 
-# Build daemon (untuk VM)
+# Build daemon (for VM)
 go build -o tuskd ./cmd/tuskd
 
 # Optionally, add to PATH
@@ -62,7 +62,7 @@ cp tusk $PREFIX/bin/
 ./tusk run alpine echo "Hello from Tusk!"
 ```
 
-## Verifikasi Installation
+## Verifying the Installation
 
 ```bash
 # Check version
@@ -77,25 +77,25 @@ cp tusk $PREFIX/bin/
 
 ## Troubleshooting
 
-### QEMU tidak ditemukan
+### QEMU not found
 
 ```bash
 which qemu-system-x86_64
-# Jika tidak ada, install dengan:
+# If not present, install with:
 pkg install qemu-system-x86-64
 ```
 
-### VM tidak mau start
+### VM refuses to start
 
-Pastikan Alpine ISO tersedia:
+Make sure the Alpine ISO is available:
 ```bash
 ls ~/alpine-virt-*.iso
 ```
 
 ### Permission error
 
-Tusk memerlukan akses untuk:
-- Create socket files di `~/.tusk/`
+Tusk requires access to:
+- Create socket files in `~/.tusk/`
 - Execute QEMU
 
 ---

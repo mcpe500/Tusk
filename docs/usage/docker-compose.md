@@ -1,10 +1,10 @@
 # Docker Compose
 
-Tusk mendukung Docker Compose untuk multi-container applications.
+Tusk supports Docker Compose for multi-container applications.
 
 ## File Format
 
-Gunakan `docker-compose.yml` atau `tusk-compose.yaml`:
+Use `docker-compose.yml` or `tusk-compose.yaml`:
 
 ```yaml
 version: "3.8"
@@ -39,7 +39,7 @@ networks:
 ## Commands
 
 ### `tusk compose up`
-Create dan start semua services.
+Create and start all services.
 
 ```bash
 tusk compose up              # Foreground
@@ -48,7 +48,7 @@ tusk compose up --build       # Build images first
 ```
 
 ### `tusk compose down`
-Stop dan remove services, networks.
+Stop and remove services, networks.
 
 ```bash
 tusk compose down            # Stop containers
@@ -67,7 +67,7 @@ tusk compose ps
 ```
 
 ### `tusk compose logs`
-View logs dari semua services.
+View logs from all services.
 
 ```bash
 tusk compose logs            # All services
@@ -76,7 +76,7 @@ tusk compose logs -f         # Follow logs
 ```
 
 ### `tusk compose build`
-Build images (untuk Dockerfile).
+Build images (for Dockerfile).
 
 ```bash
 tusk compose build
@@ -84,7 +84,7 @@ tusk compose build --no-cache
 ```
 
 ### `tusk compose stop`
-Stop services tanpa remove.
+Stop services without removing.
 
 ```bash
 tusk compose stop
@@ -102,29 +102,29 @@ tusk compose rm -s           # Stop before removing
 
 | Key | Status | Description |
 |-----|--------|-------------|
-| `services` | ✅ | Service definitions |
-| `image` | ✅ | Container image |
-| `command` | ✅ | Override default command |
-| `depends_on` | ✅ | Service dependencies |
-| `ports` | ✅ | Port mappings |
-| `volumes` | ✅ | Volume mounts |
-| `environment` | ✅ | Environment variables |
-| `networks` | ✅ | Network configuration |
-| `build` | ⬜ | Dockerfile build (planned) |
-| `restart` | ⬜ | Restart policy (planned) |
-| `labels` | ✅ | Container labels |
-| `healthcheck` | ⬜ | Health check (planned) |
+| `services` | partial | Service definitions |
+| `image` | partial | Container image |
+| `command` | partial | Override default command |
+| `depends_on` | partial | Service dependencies |
+| `ports` | partial | Port mappings |
+| `volumes` | partial | Volume mounts |
+| `environment` | partial | Environment variables |
+| `networks` | partial | Network configuration |
+| `build` | stub | Dockerfile build |
+| `restart` | stub | Restart policy |
+| `labels` | partial | Container labels |
+| `healthcheck` | stub | Health check |
 
 ## Dependency Resolution
 
-Services di-start berdasarkan `depends_on`:
+Services are started based on `depends_on`:
 
 ```
 web (depends on: db) ──────► db
 frontend (depends on: web) ─┘
 ```
 
-Services di-stop dalam urutan terbalik:
+Services are stopped in reverse order:
 1. frontend
 2. web
 3. db

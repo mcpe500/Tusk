@@ -2,36 +2,36 @@
 
 ## Overview
 
-Berikut rencana pengembangan Tusk. Roadmap ini akan diupdate secara berkala.
+The following is the Tusk development plan. This roadmap will be updated periodically.
 
 ## Version 1.0.0 - MVP (Current)
 
-**Goal:** Basic container runtime yang bisa pull dan run containers.
+**Goal:** Basic container runtime that can pull and run containers.
 
-### Phase 1: Core Infrastructure ✅
+### Phase 1: Core Infrastructure (done)
 
 - [x] Go CLI skeleton
 - [x] QEMU VM Manager (start/stop/status)
-- [x] QMP client untuk VM control
+- [x] QMP client for VM control
 - [x] Serial socket communication
 - [x] JSON-RPC protocol
 
-### Phase 2: Image Management ✅
+### Phase 2: Image Management (done)
 
 - [x] OCI image store
-- [x] Image pull dari Docker Hub
-- [x] Blob storage dengan SHA256 digest
+- [x] Image pull from Docker Hub
+- [x] Blob storage with SHA256 digest
 - [x] Manifest parsing
 
-### Phase 3: Container Runtime (In Progress) 🚧
+### Phase 3: Container Runtime (partial)
 
-- [ ] VM image dengan Alpine + tuskd
+- [ ] VM image with Alpine + tuskd
 - [ ] Container creation
 - [ ] Container lifecycle (start/stop/rm)
 - [ ] Container exec
 - [ ] Container logs
 
-### Phase 4: Networking & Storage ⬜
+### Phase 4: Networking & Storage (stub)
 
 - [ ] Port forwarding
 - [ ] Volume mounts (bind)
@@ -43,7 +43,7 @@ Berikut rencana pengembangan Tusk. Roadmap ini akan diupdate secara berkala.
 
 ### Planned Features
 
-- [ ] Container exec dengan PTY
+- [ ] Container exec with PTY
 - [ ] Container pause/resume
 - [ ] Resource limits (CPU, memory)
 - [ ] Container inspect

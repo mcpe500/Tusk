@@ -15,15 +15,15 @@
 
 | State | Description |
 |-------|-------------|
-| `created` | Container dibuat tapi belum start |
-| `running` | Container sedang berjalan |
-| `paused` | Container di-pause (coming soon) |
-| `stopped` | Container sudah stop |
-| `deleted` | Container sudah dihapus |
+| `created` | Container was created but not yet started |
+| `running` | Container is running |
+| `paused` | Container is paused (stub) |
+| `stopped` | Container has stopped |
+| `deleted` | Container has been deleted |
 
 ## Container Configuration
 
-Container di-configure menggunakan OCI Runtime Spec:
+Containers are configured using the OCI Runtime Spec:
 
 ```json
 {
@@ -50,7 +50,7 @@ Container di-configure menggunakan OCI Runtime Spec:
 
 ## Container Storage
 
-Container state dan data disimpan di:
+Container state and data are stored in:
 
 ```
 ~/.tusk/
@@ -65,7 +65,7 @@ Container state dan data disimpan di:
 
 ## Resource Limits
 
-Tusk mendukung resource limiting via OCI spec:
+Tusk supports resource limiting via the OCI spec:
 
 ```yaml
 resources:
@@ -80,7 +80,7 @@ resources:
 
 ## Health Checks
 
-Container bisa dikonfigurasi dengan health check:
+Containers can be configured with a health check:
 
 ```yaml
 healthcheck:

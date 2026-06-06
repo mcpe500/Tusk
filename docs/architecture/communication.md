@@ -2,7 +2,7 @@
 
 ## Overview
 
-Tusk menggunakan JSON-RPC 2.0 untuk komunikasi antara host CLI (`tusk`) dan guest daemon (`tuskd`).
+Tusk uses JSON-RPC 2.0 for communication between the host CLI (`tusk`) and the guest daemon (`tuskd`).
 
 ## Transport Layer
 

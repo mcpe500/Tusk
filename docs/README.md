@@ -1,45 +1,48 @@
-# Dokumentasi Tusk
+# Tusk Documentation
 
-Selamat datang di dokumentasi Tusk! Berikut struktur dokumentasi ini:
+Welcome to the Tusk documentation! Here is the structure of this documentation:
 
-## 📚 Daftar Dokumen
+## 📚 Document List
 
 ### [Overview](overview.md)
-- Pengenalan Tusk
-- Kenapa Tusk ada
-- Perbandingan dengan Docker
+- Introduction to Tusk
+- Why Tusk exists
+- Comparison with Docker
 
 ### [Installation](installation.md)
-- Cara install Tusk
+- How to install Tusk
 - Requirements
 - Quick start guide
 
 ### [Usage](usage/)
-- [Basic Commands](usage/basic-commands.md) - Command dasar
-- [Container Management](usage/container-management.md) - Kelola container
+- [Basic Commands](usage/basic-commands.md) - Basic commands
+- [Container Management](usage/container-management.md) - Manage containers
 - [Docker Compose](usage/docker-compose.md) - Compose support
 
+### Specification Status
+- [Feature status](spec-status.md) - Definitions of `done`, `partial`, and `stub`
+
 ### [Architecture](architecture/)
-- [System Design](architecture/system-design.md) - Arsitektur sistem
+- [System Design](architecture/system-design.md) - System architecture
 - [Communication Protocol](architecture/communication.md) - JSON-RPC protocol
 - [Image Format](architecture/image-format.md) - OCI image format
 
 ### [Development](development/)
-- [Contributing](development/contributing.md) - Cara berkontribusi
-- [Building from Source](development/building.md) - Build dari source
+- [Contributing](development/contributing.md) - How to contribute
+- [Building from Source](development/building.md) - Build from source
 - [Testing](development/testing.md) - Testing guide
 
 ## 🔗 Quick Links
 
-- [Main README](../README.md) - README utama dengan overview
-- [Roadmap](../ROADMAP.md) - Rencana pengembangan
-- [Changelog](../CHANGELOG.md) - Riwayat perubahan
+- [Main README](../README.md) - Main README with overview
+- [Roadmap](../ROADMAP.md) - Development plan
+- [Changelog](../CHANGELOG.md) - Change history
 
-## ❓ Butuh Bantuan?
+## ❓ Need Help?
 
-- [GitHub Issues](https://github.com/mcpe500/Tusk/issues) - Laporkan bug atau minta fitur
-- [Discussions](https://github.com/mcpe500/Tusk/discussions) - Diskusi umum
+- [GitHub Issues](https://github.com/mcpe500/Tusk/issues) - Report a bug or request a feature
+- [Discussions](https://github.com/mcpe500/Tusk/discussions) - General discussion
 
 ---
 
-*Docs terakhir diupdate: 2026-05-27*
+*Docs last updated: 2026-05-27*

@@ -1,24 +1,24 @@
 # Tusk - Overview
 
-## Apa itu Tusk?
+## What is Tusk?
 
-**Tusk** adalah container runtime untuk Termux yang memanfaatkan QEMU VM sebagai pengganti Docker. Dengan Tusk, kamu bisa menjalankan container images dari Docker Hub di lingkungan Termux/Android.
+**Tusk** is a container runtime for Termux that uses a QEMU VM as a replacement for Docker. With Tusk, you can run container images from Docker Hub in a Termux/Android environment.
 
-> "Docker tidak bisa jalan di Termux? Oke, kita bikin sendiri."
+> "Docker can't run on Termux? Okay, let's build our own."
 
-## Kenapa Tusk Ada?
+## Why Tusk Exists
 
-Docker adalah standar industri untuk containerization, tapi Docker butuh:
+Docker is the industry standard for containerization, but Docker needs:
 - `dockerd` (Linux daemon)
-- Linux namespaces (pid, network, mount, dll)
-- Cgroups untuk resource limiting
+- Linux namespaces (pid, network, mount, etc.)
+- Cgroups for resource limiting
 - Overlay filesystem
 
-**Semuanya tidak tersedia di Termux/Android.**
+**All of these are not available in Termux/Android.**
 
-QEMU adalah alternatif yang bisa berjalan di Termux. Dengan Alpine Linux (sangat ringan, ~50MB RAM), kita bisa membuat VM yang bertindak sebagai "container host".
+QEMU is an alternative that can run on Termux. With Alpine Linux (very lightweight, ~50MB RAM), we can create a VM that acts as a "container host".
 
-## Arsitektur
+## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -42,35 +42,35 @@ QEMU adalah alternatif yang bisa berjalan di Termux. Dengan Alpine Linux (sangat
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### Komponen Utama
+### Main Components
 
-| Komponen | Fungsi |
+| Component | Function |
 |----------|--------|
-| `tusk` CLI | Command-line interface di host |
-| `tuskd` | Daemon yang jalan di dalam VM |
-| QEMU VM | Isolasi via virtualisasi |
-| Image Store | Simpan dan pull OCI images |
+| `tusk` CLI | Command-line interface on the host |
+| `tuskd` | Daemon that runs inside the VM |
+| QEMU VM | Isolation via virtualization |
+| Image Store | Stores and pulls OCI images |
 
-## Perbandingan dengan Docker
+## Comparison with Docker
 
-| Aspek | Docker | Tusk |
+| Aspect | Docker | Tusk |
 |-------|--------|------|
 | Isolation | Linux namespaces | QEMU VM |
-| Startup Time | ~100ms | ~3-5 detik |
+| Startup Time | ~100ms | ~3-5 seconds |
 | Memory Overhead | ~10MB | ~50MB |
 | Resource Usage | Low | Medium |
-| Portability | Linux only | Any platform dengan QEMU |
-| OCI Compatible | Yes | Partial |
+| Portability | Linux only | Any platform with QEMU |
+| OCI Compatible | Yes | partial |
 
-## Fitur
+## Features
 
-- ✅ Pull images dari Docker Hub
-- ✅ Run containers
-- ✅ Docker Compose support
-- ✅ OCI-compliant image format
-- ⬜ Port forwarding (coming soon)
-- ⬜ Volume mounts (coming soon)
-- ⬜ Container exec (coming soon)
+- done: Pull images from Docker Hub
+- partial: Run containers
+- partial: Docker Compose support
+- partial: OCI-compliant image format
+- stub: Port forwarding
+- stub: Volume mounts
+- stub: Container exec
 
 ## License
 

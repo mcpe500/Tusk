@@ -3,7 +3,7 @@
 ## VM Management
 
 ### `tusk init`
-Initialize Tusk storage dan direktori yang dibutuhkan.
+Initialize Tusk storage and the required directories.
 
 ```bash
 tusk init
@@ -11,7 +11,7 @@ tusk init
 ```
 
 ### `tusk start`
-Start QEMU VM dengan Alpine Linux.
+Start QEMU VM with Alpine Linux.
 
 ```bash
 tusk start
@@ -26,7 +26,7 @@ tusk stop
 ```
 
 ### `tusk status`
-Cek status VM dan sockets.
+Check VM and sockets status.
 
 ```bash
 tusk status
@@ -39,7 +39,7 @@ tusk status
 ## Image Management
 
 ### `tusk pull <image>`
-Pull image dari Docker Hub.
+Pull image from Docker Hub.
 
 ```bash
 tusk pull alpine:latest
@@ -48,7 +48,7 @@ tusk pull postgres:15
 ```
 
 ### `tusk images`
-List semua images yang sudah di-pull.
+List all images that have been pulled.
 
 ```bash
 tusk images
@@ -63,13 +63,13 @@ tusk images
 ## Container Operations
 
 ### `tusk run`
-Run container dari image.
+Run container from image.
 
 ```bash
-# Run dengan command
+# Run with command
 tusk run alpine echo hello
 
-# Run secara detached
+# Run detached
 tusk run -d --name web nginx
 
 # Mount volume
@@ -80,8 +80,8 @@ tusk run -p 8080:80 nginx
 ```
 
 **Options:**
-- `-d, --detach` - Run di background
-- `--name` - Nama container
+- `-d, --detach` - Run in background
+- `--name` - Container name
 - `-v, --volume` - Mount volume
 - `-p, --publish` - Port forwarding
 - `-e, --env` - Environment variable
@@ -100,7 +100,7 @@ tusk ps
 ```
 
 ### `tusk exec <container> <command>`
-Execute command di running container.
+Execute command in running container.
 
 ```bash
 tusk exec web ls /app
@@ -108,7 +108,7 @@ tusk exec -it web /bin/sh
 ```
 
 ### `tusk logs <container>`
-Tampilkan logs dari container.
+Display logs from container.
 
 ```bash
 tusk logs web

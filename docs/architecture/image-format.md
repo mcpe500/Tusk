@@ -1,6 +1,6 @@
 # OCI Image Format
 
-Tusk menggunakan Open Container Initiative (OCI) image format yang kompatibel dengan Docker dan container tools lainnya.
+Tusk uses the Open Container Initiative (OCI) image format that is compatible with Docker and other container tools.
 
 ## Image Structure
 
@@ -19,7 +19,7 @@ image/
 
 ## Image Index
 
-`index.json` adalah entry point yang menunjuk ke manifest(s):
+`index.json` is the entry point that points to manifest(s):
 
 ```json
 {
@@ -106,17 +106,17 @@ image/
 
 ## Content Addressing
 
-Semua content di-address dengan SHA256 digest:
+All content is addressed with a SHA256 digest:
 
 ```
 sha256:<64-character-hex>
 ```
 
-Contoh: `sha256:e692418e4cbaf90ca3b5844c4d1477`
+Example: `sha256:e692418e4cbaf90ca3b5844c4d1477`
 
 ## Layer Extraction
 
-Untuk create container rootfs, layers di-apply secara berurutan:
+To create a container rootfs, layers are applied in order:
 
 ```bash
 # Each layer is extracted and merged
@@ -156,7 +156,7 @@ Authorization: Bearer <token>
 
 ### Token Authentication
 
-Registry menggunakan OAuth2 token:
+Registry uses OAuth2 token:
 
 ```
 GET https://auth.docker.io/token?service=registry.docker.io&scope=repository:library/alpine:pull

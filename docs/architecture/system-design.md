@@ -2,7 +2,7 @@
 
 ## High-Level Architecture
 
-Tusk menggunakan arsitektur Client-Server dengan QEMU VM sebagai container host:
+Tusk uses a Client-Server architecture with a QEMU VM as the container host:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -43,9 +43,9 @@ Tusk menggunakan arsitektur Client-Server dengan QEMU VM sebagai container host:
 
 ### 1. tusk CLI (Host)
 
-Command-line interface yang berjalan di Termux.
+Command-line interface that runs in Termux.
 
-**Lokasi:** `cmd/tusk/`
+**Location:** `cmd/tusk/`
 
 **Responsibilities:**
 - Parse user commands
@@ -55,9 +55,9 @@ Command-line interface yang berjalan di Termux.
 
 ### 2. tuskd (Guest)
 
-Daemon yang berjalan di dalam Alpine VM.
+Daemon that runs inside the Alpine VM.
 
-**Lokasi:** `cmd/tuskd/`
+**Location:** `cmd/tuskd/`
 
 **Responsibilities:**
 - Handle JSON-RPC requests
@@ -70,7 +70,7 @@ Daemon yang berjalan di dalam Alpine VM.
 
 OCI-compliant image storage.
 
-**Lokasi:** `~/.tusk/images/`
+**Location:** `~/.tusk/images/`
 
 ```
 images/
@@ -89,7 +89,7 @@ images/
 
 Manages QEMU VM lifecycle.
 
-**Lokasi:** `internal/vm/`
+**Location:** `internal/vm/`
 
 **Features:**
 - Start/stop VM

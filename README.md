@@ -1,17 +1,17 @@
 # Tusk
 
-**Container runtime untuk Termux yang memanfaatkan QEMU VM sebagai pengganti Docker.**
+**Container runtime for Termux that uses a QEMU VM as a replacement for Docker.**
 
-> "Docker tidak bisa jalan di Termux? Oke, kita bikin sendiri." — Ide awal proyek ini.
+> "Docker can't run on Termux? Okay, let's build our own." — The original idea for this project.
 
 ---
 
 ## Table of Contents
 
-- [Cerita / Story](#-cerita--story)
-- [Arsitektur](#-arsitektur)
-- [Instalasi](#-instalasi)
-- [Penggunaan](#-penggunaan)
+- [Story](#-story)
+- [Architecture](#-architecture)
+- [Installation](#-installation)
+- [Usage](#-usage)
 - [Docker Compose](#-docker-compose)
 - [Roadmap](#-roadmap)
 - [Troubleshooting](#-troubleshooting)
@@ -20,57 +20,57 @@
 
 ---
 
-## 📖 Cerita / Story
+## 📖 Story
 
-### Masalah
+### The Problem
 
-Docker adalah standar industri untuk containerization. Tapi Docker butuh:
+Docker is the industry standard for containerization. But Docker needs:
 - `dockerd` (Linux daemon)
-- Linux namespaces (pid, network, mount, dll)
-- Cgroups untuk resource limiting
+- Linux namespaces (pid, network, mount, etc.)
+- Cgroups for resource limiting
 - Overlay filesystem
 
-Semuanya **tidak tersedia di Termux/Android**. Kernel Android tidak menyediakan namespace isolasi yang dibutuhkan Docker.
+All of these **are not available in Termux/Android**. The Android kernel does not provide the namespace isolation that Docker needs.
 
-### Eksplorasi
+### Exploration
 
-Meskipun Docker tidak bisa jalan, ada alternatif: **QEMU bisa berjalan di Termux**.
+Although Docker cannot run, there is an alternative: **QEMU can run on Termux**.
 
-QEMU adalah emulator yang bisa virtualisasi x86_64 VM secara full. Dengan Alpine Linux (sangat ringan, ~50MB RAM), kita bisa membuatVM yang bertindak sebagai "container host".
+QEMU is an emulator that can fully virtualize x86_64 VMs. With Alpine Linux (very lightweight, ~50MB RAM), we can create a VM that acts as a "container host".
 
-### Solusi: Tusk
+### The Solution: Tusk
 
-Tusk menggunakan arsitektur berbeda dari Docker:
+Tusk uses a different architecture from Docker:
 
 ```
 Docker:           Tusk:
 ┌──────────┐      ┌─────────────────┐    ┌─────────────────┐
 │   Host   │      │     Host        │    │     QEMU VM     │
 │ (Termux) │      │   (Termux)      │    │   (Alpine)      │
-└──────────┘      └────────┬─────────┘    └────────┬─────────┘
-                          │                      │
-                          │  tusk CLI             │  tuskd
-                          ▼                      ▼
-                     ┌─────────────┐        ┌─────────────┐
-                     │  socket     │◄──────►│  container  │
-                     │  (.tusk/)   │  9p    │  process    │
-                     └─────────────┘        └─────────────┘
+└──────────┘      └────────┬────────┘    └────────┬────────┘
+                           │                      │
+                           │  tusk CLI             │  tuskd
+                           ▼                      ▼
+                      ┌─────────────┐        ┌─────────────┐
+                      │  socket     │◄──────►│  container  │
+                      │  (.tusk/)   │  9p    │  process    │
+                      └─────────────┘        └─────────────┘
 ```
 
-**Intinya:** VM替代 namespace untuk isolasi. Heavy? Ya. Tapi jalan di Termux.
+**Bottom line:** VM replaces namespaces for isolation. Heavy? Yes. But it works on Termux.
 
 ---
 
-## 🏗️ Arsitektur
+## 🏗️ Architecture
 
-### Komponen Utama
+### Main Components
 
-| Komponen | Lokasi | Fungsi |
-|----------|--------|--------|
-| `tusk` CLI | `cmd/tusk/` | Command-line interface di host |
-| `tuskd` | `cmd/tuskd/` | Daemon yang jalan di dalam VM |
-| VM Manager | `internal/vm/` | Kelola lifecycle QEMU VM |
-| Image Store | `internal/image/` | Simpan dan pull OCI images |
+| Component | Location | Function |
+|----------|----------|----------|
+| `tusk` CLI | `cmd/tusk/` | Command-line interface on the host |
+| `tuskd` | `cmd/tuskd/` | Daemon that runs inside the VM |
+| VM Manager | `internal/vm/` | Manages the QEMU VM lifecycle |
+| Image Store | `internal/image/` | Stores and pulls OCI images |
 | Compose | `internal/compose/` | Docker Compose support |
 
 ### Data Flow
@@ -81,16 +81,16 @@ User: $ tusk run alpine echo hello
          ▼
 ┌────────────────────────────────────────────────────────────┐
 │ 1. tusk CLI parse command                                  │
-│ 2. Connect ke tuskd via socket (.tusk/vms/serial.sock)    │
-│ 3. Kirim JSON-RPC: ContainerCreate                         │
-│ 4. tuskd spawn process di Alpine VM                        │
-│ 5. Result kembali ke CLI                                   │
+│ 2. Connect to tuskd via socket (.tusk/vms/serial.sock)    │
+│ 3. Send JSON-RPC: ContainerCreate                          │
+│ 4. tuskd spawn process in Alpine VM                        │
+│ 5. Result returned to CLI                                  │
 └────────────────────────────────────────────────────────────┘
 ```
 
 ### Communication Protocol
 
-Host ↔ VM menggunakan **JSON-RPC 2.0** via Unix socket:
+Host ↔ VM uses **JSON-RPC 2.0** over a Unix socket:
 
 ```json
 // Host → tuskd
@@ -125,28 +125,28 @@ Host ↔ VM menggunakan **JSON-RPC 2.0** via Unix socket:
 
 ---
 
-## 🚀 Instalasi
+## 🚀 Installation
 
 ### Prerequisites
 
-1. **Termux** - Download dari F-Droid (bukan Play Store)
-2. **Storage** - Minimal 3GB free space
-3. **Internet** - Untuk download Alpine ISO dan Docker images
+1. **Termux** - Download from F-Droid (not Play Store)
+2. **Storage** - At least 3GB free space
+3. **Internet** - For downloading Alpine ISO and Docker images
 
-### Opsi 1: One-liner Install (Recommended)
+### Option 1: One-liner Install (Recommended)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/mcpe500/Tusk/main/scripts/install.sh | bash
 ```
 
-Script ini akan:
+This script will:
 1. Install dependencies (QEMU, Go, Git)
-2. Clone/Update Tusk repo
-3. Build `tusk` binary untuk host
-4. Build `tuskd-amd64` binary untuk VM
+2. Clone/Update the Tusk repo
+3. Build the `tusk` binary for the host
+4. Build the `tuskd-amd64` binary for the VM
 5. Initialize Tusk storage
 
-### Opsi 2: Manual Install
+### Option 2: Manual Install
 
 ```bash
 # Install dependencies
@@ -164,7 +164,7 @@ GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o ~/.tusk/tuskd-amd64 ./cmd/tusk
 ~/tusk init
 ```
 
-### Setup VM
+### VM Setup
 
 ```bash
 # 1. Create VM disk (2GB qcow2)
@@ -179,9 +179,9 @@ GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o ~/.tusk/tuskd-amd64 ./cmd/tusk
 #   - Use 'sys' install
 #   - After installation: poweroff
 
-# 3. Configure Alpine (jalankan di dalam VM setelah install)
+# 3. Configure Alpine (run inside the VM after install)
 ./scripts/configure-alpine.sh
-# Ini akan:
+# This will:
 #   - Setup 9p filesystem mount
 #   - Install tuskd auto-start service
 #   - Configure serial console
@@ -190,7 +190,7 @@ GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o ~/.tusk/tuskd-amd64 ./cmd/tusk
 reboot
 ```
 
-### Verifikasi Installation
+### Verifying the Installation
 
 ```bash
 # Check tusk version
@@ -200,13 +200,13 @@ tusk version
 tusk status
 # Expected: VM: Running, tuskd: OK
 
-# Or use script directly
+# Or use the script directly
 ./scripts/tusk-vm.sh status
 ```
 
 ---
 
-## 🛠️ Penggunaan
+## 🛠️ Usage
 
 ### Initialize & Start
 
@@ -217,7 +217,7 @@ tusk init
 # Start VM
 tusk start
 
-# Or use script
+# Or use the script
 ./scripts/tusk-vm.sh start
 
 # Check status
@@ -403,33 +403,33 @@ tusk compose build
 
 ---
 
-## 🔧 Keputusan Desain
+## 🔧 Design Decisions
 
 ### 1. Single VM Model vs Per-Container VM
 
-**Pilihan:** Single VM (satu VM untuk semua container)
+**Choice:** Single VM (one VM for all containers)
 
-| Alternatif | Kelebihan | Kekurangan |
+| Alternative | Advantages | Disadvantages |
 |------------|-----------|------------|
-| Single VM | Simpel, shared networking | Kurang terisolasi |
-| Per-Container VM | Terisolasi sepenuhnya | Heavy (banyak VM), lambat start |
-| **Single VM (chosen)** | ✓ Manageable | ✓ Compatible dengan Docker workflow |
+| Single VM | Simple, shared networking | Less isolated |
+| Per-Container VM | Fully isolated | Heavy (many VMs), slow start |
+| **Single VM (chosen)** | ✓ Manageable | ✓ Compatible with Docker workflow |
 
 ### 2. OCI Compliance
 
-**Mengapa penting:**
-- Bisa pull dari Docker Hub langsung
-- Tools existing (docker, podman) bisa inspect images
+**Why it matters:**
+- Can pull from Docker Hub directly
+- Existing tools (docker, podman) can inspect images
 - Industry standard
 
-**Implementasi:**
-- Image manifest mengikuti OCI Image Spec
-- Container config mengikuti OCI Runtime Spec
-- Layer storage sebagai content-addressable blobs
+**Implementation:**
+- Image manifest follows OCI Image Spec
+- Container config follows OCI Runtime Spec
+- Layer storage as content-addressable blobs
 
-### 3. 9p Filesystem untuk Shared Storage
+### 3. 9p Filesystem for Shared Storage
 
-QEMU virtfs dengan 9p protocol memungkinkan host dan VM berbagi filesystem:
+QEMU virtfs with the 9p protocol allows the host and VM to share a filesystem:
 
 ```bash
 # Host (Termux)
@@ -439,22 +439,22 @@ QEMU virtfs dengan 9p protocol memungkinkan host dan VM berbagi filesystem:
 mount -t 9p -o trans=virtio tusk-data /tusk
 ```
 
-**Keuntungan:**
-- Images tinggal di host, tidak perlu copy ke VM
-- State container persisten
-- Volume mount straightforward
+**Advantages:**
+- Images stay on the host, no need to copy to the VM
+- Container state is persistent
+- Volume mounts are straightforward
 
-### 4. virtio-serial untuk Control Channel
+### 4. virtio-serial for Control Channel
 
-Daripada QMP (yang complex), kita gunakan virtio-serial yang lebih simpel:
+Instead of QMP (which is complex), we use virtio-serial which is simpler:
 
 ```bash
 -serial unix:$HOME/.tusk/vms/serial.sock
 ```
 
-**Alasan:**
-- QMP butuh handshake protocol yang kompleks
-- Serial lebih straightforward untuk JSON-RPC
+**Reason:**
+- QMP requires a complex handshake protocol
+- Serial is more straightforward for JSON-RPC
 - Reliable, low-latency
 
 ### 5. User-mode Networking
@@ -463,42 +463,42 @@ Daripada QMP (yang complex), kita gunakan virtio-serial yang lebih simpel:
 -netdev user,id=net0,hostfwd=tcp::8080-:80
 ```
 
-**Keuntungan:**
-- Tidak butuh root
-- Tidak butuh TAP/TUN device
-- Bekerja di Android environment
+**Advantages:**
+- Does not require root
+- Does not require a TAP/TUN device
+- Works in the Android environment
 
-**Kekurangan:**
-- Container tidak bisa diakses dari luar secara langsung
-- Tidak se-fleksibel bridge networking
+**Disadvantages:**
+- Containers cannot be accessed from outside directly
+- Not as flexible as bridge networking
 
 ---
 
 ## 🔄 Roadmap
 
-### Phase 1: Core Infrastructure ✅
+### Phase 1: Core Infrastructure (done)
 - [x] Go CLI skeleton
 - [x] QEMU VM Manager
 - [x] QMP client
 - [x] JSON-RPC protocol
 
-### Phase 2: Image Management ✅
+### Phase 2: Image Management (done)
 - [x] Image store (OCI format)
 - [x] Image pull from registry
 - [ ] Layer extraction and caching
 
-### Phase 3: Container Runtime (In Progress)
+### Phase 3: Container Runtime (partial)
 - [ ] VM with Alpine + tuskd
 - [ ] Container creation (runc integration)
 - [ ] Container lifecycle (start/stop/rm)
 - [ ] Container exec with PTY
 
-### Phase 4: Networking & Storage
+### Phase 4: Networking & Storage (stub)
 - [ ] Port forwarding
 - [ ] Volume mounts (9p)
 - [ ] Network isolation
 
-### Phase 5: Compose & Distribution
+### Phase 5: Compose & Distribution (partial)
 - [x] YAML parsing
 - [ ] Service orchestration
 - [ ] Dependency resolution
@@ -508,7 +508,7 @@ Daripada QMP (yang complex), kita gunakan virtio-serial yang lebih simpel:
 
 ## ❓ Troubleshooting
 
-### VM tidak bisa start
+### VM cannot start
 
 ```bash
 # Check QEMU installed
@@ -523,19 +523,19 @@ df -h $HOME
 # View QEMU logs
 cat ~/.tusk/vm/qemu.log
 
-# Start dengan verbose
+# Start with verbose
 qemu-system-x86_64 -M pc-i440fx-9.2 -m 512 -nographic \
   -drive file=$HOME/.tusk/vm/disk.qcow2,if=virtio,format=qcow2
 ```
 
-### tuskd tidak mau start di VM
+### tuskd refuses to start in the VM
 
 ```bash
-# Attach ke serial console
+# Attach to serial console
 ./scripts/tusk-vm.sh attach
 
-# Login sebagai root, check:
-rc-status              # Lihat service status
+# Login as root, check:
+rc-status              # View service status
 ls -la /usr/local/bin/tuskd
 cat /etc/init.d/tuskd
 
@@ -546,7 +546,7 @@ rc-service tuskd start
 cat /var/log/tuskd.log 2>/dev/null || echo "No log file"
 ```
 
-### tusk CLI tidak connect ke VM
+### tusk CLI cannot connect to the VM
 
 ```bash
 # Check VM running
@@ -555,14 +555,14 @@ cat /var/log/tuskd.log 2>/dev/null || echo "No log file"
 # Check serial socket exists
 ls -la ~/.tusk/vm/serial.sock
 
-# Manual test dengan nc
+# Manual test with nc
 echo '{"jsonrpc":"2.0","method":"Ping","params":{},"id":1}' | \
   nc -U ~/.tusk/vm/serial.sock
 
 # Expected response: {"jsonrpc":"2.0","result":"pong","id":1}
 ```
 
-### Image pull gagal
+### Image pull fails
 
 ```bash
 # Check internet
@@ -571,14 +571,14 @@ ping -c 1 registry-1.docker.io
 # Check storage space
 df -h $HOME
 
-# Retry dengan verbose
+# Retry with verbose
 tusk pull alpine:latest --debug 2>&1
 
 # Manual download test
 curl -I https://registry-1.docker.io/v2/
 ```
 
-### Container tidak bisa exec
+### Container exec fails
 
 ```bash
 # Check container running
@@ -591,17 +591,17 @@ ls -la ~/.tusk/containers/
 tusk logs <container-name>
 ```
 
-### Alpine install gagal
+### Alpine install fails
 
 ```bash
-# Pastikan足够的 disk space (minimal 2GB)
+# Make sure sufficient disk space (at least 2GB)
 qemu-img info ~/.tusk/vm/disk.qcow2
 
 # Re-create disk
 rm ~/.tusk/vm/disk.qcow2
 ./scripts/tusk-vm.sh create
 
-# Download Alpine ISO lagi
+# Download Alpine ISO again
 rm ~/alpine-virt-3.19.1-x86_64.iso
 ./scripts/tusk-vm.sh install
 ```
@@ -703,7 +703,7 @@ echo '{"jsonrpc":"2.0","method":"Ping","params":{},"id":1}' | \
 
 ---
 
-## 📁 Struktur Direktori
+## 📁 Directory Structure
 
 ```
 ~/.tusk/                          # Runtime data
@@ -725,7 +725,7 @@ echo '{"jsonrpc":"2.0","method":"Ping","params":{},"id":1}' | \
 Tusk/                             # Source code
 ├── cmd/
 │   ├── tusk/                     # Host CLI
-│   │   └── main.go               # 12 commands implemented
+│   │   └── main.go               # 12 commands available
 │   └── tuskd/                    # Guest daemon
 │       └── main.go               # JSON-RPC handler
 ├── internal/
@@ -737,7 +737,7 @@ Tusk/                             # Source code
 │   ├── image/                    # OCI image store + pull
 │   ├── container/                # Container runtime + spec
 │   ├── compose/                  # YAML parser
-│   └── network/                 # Network manager
+│   └── network/                  # Network manager
 ├── scripts/                      # Helper scripts
 │   ├── install.sh                # One-liner installer
 │   ├── setup-vm.sh               # VM setup
@@ -752,16 +752,16 @@ Tusk/                             # Source code
 
 ---
 
-## 📊 Perbandingan dengan Docker
+## 📊 Comparison with Docker
 
-| Aspek | Docker | Tusk |
+| Aspect | Docker | Tusk |
 |-------|--------|------|
 | Isolation | Linux namespaces | QEMU VM |
-| Startup Time | ~100ms | ~3-5 detik |
+| Startup Time | ~100ms | ~3-5 seconds |
 | Memory Overhead | ~10MB | ~50MB |
 | Resource Usage | Low | Medium |
-| Portability | Linux only | Any platform dengan QEMU |
-| OCI Compatible | Yes | Partial |
+| Portability | Linux only | Any platform with QEMU |
+| OCI Compatible | Yes | partial |
 | Root Required | Usually | No |
 | Cgroups | Yes | No (VM-based instead) |
 
@@ -769,38 +769,38 @@ Tusk/                             # Source code
 
 ## 🔍 FAQ
 
-### Q: Kenapa gak pake rootless Docker di Termux?
+### Q: Why not use rootless Docker on Termux?
 
-A: Rootless Docker tetap butuh:
-- `runc` yang compile untuk Android
+A: Rootless Docker still needs:
+- `runc` compiled for Android
 - Overlay filesystem support
 - User namespace mapping
 
-Kernel Android tidak menyediakan fitur-fitur ini.
+The Android kernel does not provide these features.
 
-### Q: Kenapa Alpine, bukan distro lain?
+### Q: Why Alpine, and not another distro?
 
-A: Alpine sangat ringan (~5MB base) dan designed untuk container. Boot time cepat dan RAM usage minimal - sempurna untuk QEMU VM di mobile.
+A: Alpine is very lightweight (~5MB base) and designed for containers. Fast boot time and minimal RAM usage - perfect for a QEMU VM on mobile.
 
-### Q: Bisa pake distro lain?
+### Q: Can I use another distro?
 
-A:理论上 bisa, tapi Alpine adalah pilihan terbaik karena:
+A: Theoretically possible, but Alpine is the best choice because:
 - Ultra-lightweight
-- Desain untuk embedded/container
-- Package manager sederhana (apk)
-- Banyak Docker images based on Alpine
+- Designed for embedded/container
+- Simple package manager (apk)
+- Many Docker images are based on Alpine
 
-### Q: Performance impact gimana?
+### Q: What is the performance impact?
 
-A: QEMU adds ~50-100MB RAM overhead dan ~3-5 detik boot time. Untuk development/testing ini acceptable. Production di mobile设备 belum direkomendasikan.
+A: QEMU adds ~50-100MB RAM overhead and ~3-5 seconds of boot time. For development/testing this is acceptable. Production on mobile devices is not yet recommended.
 
 ### Q: Multi-arch support?
 
-A: Currently x86_64 only. ARM64 VMs butuh lebih banyak resources. Future: mungkin support aarch64 guests.
+A: Currently x86_64 only. ARM64 VMs need more resources. Future: might support aarch64 guests.
 
-### Q: Bisa run Windows container?
+### Q: Can I run Windows container?
 
-A: Tidak. Tusk is Linux-only container runtime. Windows containers butuh Hyper-V atau Windows Server - tidak compatible dengan QEMU emulation.
+A: No. Tusk is a Linux-only container runtime. Windows containers need Hyper-V or Windows Server - not compatible with QEMU emulation.
 
 ---
 
@@ -821,15 +821,15 @@ case "newcommand":
 
 ### Adding API Methods
 
-1. Define params struct di `pkg/protocol/api.go`
-2. Handle di `cmd/tuskd/main.go` (handleConnection function)
-3. Add client method di `internal/client/client.go`
+1. Define params struct in `pkg/protocol/api.go`
+2. Handle in `cmd/tuskd/main.go` (handleConnection function)
+3. Add client method in `internal/client/client.go`
 
 ### Testing VM Integration
 
-Untuk full integration test, butuh:
-1. Alpine VM image dengan tuskd binary
-2. QEMU configured untuk serial + 9p
+For a full integration test, you need:
+1. An Alpine VM image with the tuskd binary
+2. QEMU configured for serial + 9p
 3. Network connectivity
 
 ### Building
@@ -841,7 +841,7 @@ go build -o tusk ./cmd/tusk
 # Build VM daemon (x86_64 Linux)
 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o tuskd-amd64 ./cmd/tuskd
 
-# Build untuk release
+# Build for release
 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o tusk ./cmd/tusk
 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o tuskd-amd64 ./cmd/tuskd
 ```
@@ -856,10 +856,10 @@ MIT
 
 ## 🙏 Credits
 
-- Docker untuk OCI spec inspiration
-- Alpine Linux untuk minimal base image
-- QEMU untuk virtualization
-- Termux untuk environment ini
+- Docker for OCI spec inspiration
+- Alpine Linux for the minimal base image
+- QEMU for virtualization
+- Termux for this environment
 
 ---
 
@@ -870,7 +870,7 @@ MIT
 - Basic VM management (QEMU-based)
 - Image pull from Docker Hub (OCI format)
 - JSON-RPC communication protocol
-- Basic container lifecycle (stub)
+- Basic container lifecycle (partial)
 - Docker Compose YAML parsing
 - Alpine VM setup scripts
 

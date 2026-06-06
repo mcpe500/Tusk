@@ -1,42 +1,42 @@
 # Changelog
 
-Semua perubahan penting akan didokumentasikan di file ini.
+All notable changes will be documented in this file.
 
-Format mengikuti [Keep a Changelog](https://keepachangelog.com/).
+The format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
 ### Added
 
-- [Initial commit] Project structure dan Go modules
-- `tusk` CLI dengan basic commands
-- `tuskd` daemon dengan simulation mode
-- OCI-compliant types untuk image, container, dan compose
-- VM manager dengan QMP client
-- JSON-RPC client untuk komunikasi CLI-daemon
-- Image store dengan Docker Hub pull support
+- [Initial commit] Project structure and Go modules
+- `tusk` CLI with basic commands
+- `tuskd` daemon with simulation mode
+- OCI-compliant types for image, container, and compose
+- VM manager with QMP client
+- JSON-RPC client for CLI-daemon communication
+- Image store with Docker Hub pull support
 - Docker Compose YAML parser
 - Network manager (basic)
-- Dokumentasi lengkap di `/docs`
+- Complete documentation in `/docs`
 
-### Commands Implemented
+### Command Status
 
 | Command | Status |
 |---------|--------|
-| `tusk init` | ✅ Implemented |
-| `tusk start` | ✅ Implemented |
-| `tusk stop` | ✅ Implemented |
-| `tusk status` | ✅ Implemented |
-| `tusk pull` | ✅ Implemented |
-| `tusk images` | ✅ Implemented |
-| `tusk run` | ⬜ Stub only |
-| `tusk ps` | ⬜ Stub only |
-| `tusk exec` | ⬜ Stub only |
-| `tusk logs` | ⬜ Stub only |
-| `tusk container` | ✅ Implemented |
-| `tusk network` | ✅ Implemented |
-| `tusk volume` | ✅ Implemented |
-| `tusk compose` | ✅ Implemented |
+| `tusk init` | done |
+| `tusk start` | done |
+| `tusk stop` | done |
+| `tusk status` | done |
+| `tusk pull` | done |
+| `tusk images` | done |
+| `tusk run` | partial |
+| `tusk ps` | partial |
+| `tusk exec` | partial |
+| `tusk logs` | partial |
+| `tusk container` | partial |
+| `tusk network` | stub |
+| `tusk volume` | stub |
+| `tusk compose` | partial |
 
 ### Documentation
 

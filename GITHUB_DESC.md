@@ -29,13 +29,13 @@ Termux (Host)                    QEMU VM (Alpine)
 
 ## Features
 
-- ✅ **OCI-compliant** — Pull images from Docker Hub
-- ✅ **Docker CLI compatible** — `tusk run`, `tusk ps`, `tusk exec`, etc.
-- ✅ **Docker Compose support** — `tusk compose up`
-- ✅ **QEMU-based isolation** — Works where Docker can't
-- ✅ **Alpine Linux base** — Minimal footprint (~50MB RAM)
-- ⬜ Port forwarding (coming soon)
-- ⬜ Volume mounts (coming soon)
+- done: **OCI-compliant** — Pull images from Docker Hub
+- partial: **Docker CLI compatible** — `tusk run`, `tusk ps`, `tusk exec`, etc.
+- partial: **Docker Compose support** — `tusk compose up`
+- done: **QEMU-based isolation** — Works where Docker can't
+- done: **Alpine Linux base** — Minimal footprint (~50MB RAM)
+- stub: Port forwarding
+- stub: Volume mounts
 
 ## Quick Start
 
@@ -61,8 +61,8 @@ go build -o tuskd ./cmd/tuskd
 |----------|------------------|-----------|------------|
 | Native Docker | ❌ No | High | Low |
 | Docker-in-Docker | ❌ No | Medium | High |
-| **Tusk (QEMU)** | **✅ Yes** | **High** | **Medium** |
-| chroot only | ⚠️ Partial | Low | Low |
+| **Tusk (QEMU)** | **done** | **High** | **Medium** |
+| chroot only | partial | Low | Low |
 
 QEMU with TCG (software emulation) is the only practical solution for full container isolation on Android.
 
@@ -105,7 +105,7 @@ tusk compose up/down   Docker Compose
 
 ## Status
 
-**Alpha** — Proof of concept. Core infrastructure complete, full container runtime in progress.
+**Alpha** — Proof of concept. Core infrastructure done, container runtime partial.
 
 ## Contributing
 
