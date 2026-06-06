@@ -7,22 +7,25 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 )
 
 type Manager struct {
-	baseDir  string
-	vmDir    string
-	sockDir  string
-	qmpSock  string
+	baseDir    string
+	vmDir      string
+	sockDir    string
+	qmpSock    string
 	serialSock string
-	cmd      *exec.Cmd
+	pidFile    string
+	cmd        *exec.Cmd
 }
 
 type Config struct {
 	Memory     int
-	CPUs      int
-	DiskPath  string
+	CPUs       int
+	DiskPath   string
 	KernelPath string
 	InitrdPath string
 }
@@ -43,6 +46,7 @@ func New(tuskDir string) *Manager {
 		sockDir:    filepath.Join(vmDir, "sockets"),
 		qmpSock:    filepath.Join(vmDir, "qmp.sock"),
 		serialSock: filepath.Join(vmDir, "serial.sock"),
+		pidFile:    filepath.Join(vmDir, "qemu.pid"),
 	}
 }
 
@@ -87,6 +91,10 @@ func (m *Manager) Start(ctx context.Context, cfg *Config) error {
 	// virtio-serial for CLI communication (server mode so QEMU creates socket)
 	args = append(args, "-serial", fmt.Sprintf("unix:%s,server,nowait", m.serialSock))
 
+	// Clean up stale sockets before starting a new VM process.
+	_ = os.Remove(m.qmpSock)
+	_ = os.Remove(m.serialSock)
+
 	// Network: user-mode NAT
 	args = append(args, "-netdev", "user,id=net0")
 	args = append(args, "-device", "virtio-net-pci,netdev=net0")
@@ -123,12 +131,33 @@ func (m *Manager) Start(ctx context.Context, cfg *Config) error {
 	}
 
 	m.cmd = cmd
+	if err := m.writePID(cmd.Process.Pid); err != nil {
+		_ = cmd.Process.Kill()
+		return err
+	}
+
 	return nil
 }
 
 func (m *Manager) Stop() error {
+	var stopErr error
+
 	if m.cmd != nil && m.cmd.Process != nil {
-		return m.cmd.Process.Kill()
+		if err := m.cmd.Process.Signal(os.Kill); err != nil && !isProcessNotRunning(err) {
+			stopErr = err
+		}
+	} else if pid, err := m.readPID(); err == nil {
+		if err := m.killPID(pid); err != nil && !isProcessNotRunning(err) {
+			stopErr = err
+		}
+	}
+
+	_ = m.clearPID()
+	_ = os.Remove(m.qmpSock)
+	_ = os.Remove(m.serialSock)
+
+	if stopErr != nil {
+		return stopErr
 	}
 	return nil
 }
@@ -141,19 +170,124 @@ func (m *Manager) Wait() error {
 }
 
 func (m *Manager) Status() VMStatus {
-	if m.cmd != nil && m.cmd.Process != nil {
-		if err := m.cmd.Process.Signal(os.Signal(nil)); err == nil {
-			return StatusRunning
-		}
+	if m.isRunning() {
+		return StatusRunning
 	}
-	if _, err := os.Stat(m.qmpSock); err == nil {
+
+	if m.QMPSocketExists() {
 		return StatusStopped
 	}
 	return StatusError
 }
 
 func (m *Manager) isRunning() bool {
-	return m.Status() == StatusRunning
+	if m.cmd != nil && m.cmd.Process != nil {
+		if m.isProcessAlive(m.cmd.Process.Pid) {
+			return true
+		}
+	}
+
+	pid, err := m.readPID()
+	if err == nil {
+		if m.isProcessAlive(pid) {
+			return true
+		}
+
+		_ = m.clearPID()
+	}
+
+	if m.isQMPListening() {
+		return true
+	}
+
+	return false
+}
+
+func (m *Manager) isQMPListening() bool {
+	if !m.QMPSocketExists() {
+		return false
+	}
+
+	qmp, err := NewQMPClient(m.qmpSock)
+	if err != nil {
+		return false
+	}
+
+	if err := qmp.Connect(); err == nil {
+		_ = qmp.Close()
+		return true
+	}
+
+	return false
+}
+
+func (m *Manager) isProcessAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+
+	if err := proc.Signal(os.Signal(nil)); err == nil {
+		return true
+	}
+	return false
+}
+
+func (m *Manager) killPID(pid int) error {
+	if pid <= 0 {
+		return nil
+	}
+
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return err
+	}
+
+	if err := proc.Signal(os.Signal(nil)); err != nil {
+		return err
+	}
+
+	return proc.Kill()
+}
+
+func (m *Manager) writePID(pid int) error {
+	if pid <= 0 {
+		return fmt.Errorf("invalid pid: %d", pid)
+	}
+	return os.WriteFile(m.pidFile, []byte(strconv.Itoa(pid)), 0644)
+}
+
+func (m *Manager) readPID() (int, error) {
+	data, err := os.ReadFile(m.pidFile)
+	if err != nil {
+		return 0, err
+	}
+
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		return 0, err
+	}
+
+	return pid, nil
+}
+
+func (m *Manager) clearPID() error {
+	return os.Remove(m.pidFile)
+}
+
+func isProcessNotRunning(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	msg := err.Error()
+	return strings.Contains(msg, "no such process") ||
+		strings.Contains(msg, "process already finished") ||
+		strings.Contains(msg, "not found")
 }
 
 func (m *Manager) QMPSocket() string {

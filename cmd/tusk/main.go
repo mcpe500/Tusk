@@ -799,6 +799,11 @@ func runComposeUp(composeFile string) {
 	// Create orchestrator
 	orch := compose.NewOrchestrator(spec, workDir)
 
+	if _, err := ensureVM(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
 	fmt.Println("Starting services...")
 
 	// Start services
@@ -823,20 +828,39 @@ func runVolume() {
 // Ensure VM is running
 func ensureVM() (*vm.Manager, error) {
 	mgr := vm.New(tuskDir)
-	if !mgr.QMPSocketExists() {
-		return nil, fmt.Errorf("VM not running. Run 'tusk start' first.")
+	deadline := time.Now().Add(5 * time.Second)
+	var lastErr error
+
+	for time.Now().Before(deadline) {
+		if !mgr.QMPSocketExists() {
+			lastErr = fmt.Errorf("VM not running. Run 'tusk start' first.")
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+
+		cli := client.New(mgr.SerialSocket())
+		if err := cli.Connect(); err != nil {
+			lastErr = fmt.Errorf("cannot connect to tuskd: %w", err)
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+
+		pingErr := cli.Ping()
+		if pingErr == nil {
+			cli.Close()
+			return mgr, nil
+		}
+
+		lastErr = fmt.Errorf("tuskd not responding: %w", pingErr)
+		cli.Close()
+		time.Sleep(200 * time.Millisecond)
 	}
 
-	client := client.New(mgr.SerialSocket())
-	if err := client.Connect(); err != nil {
-		return nil, fmt.Errorf("cannot connect to tuskd: %w", err)
+	if lastErr == nil {
+		lastErr = fmt.Errorf("VM not running. Run 'tusk start' first.")
 	}
 
-	if err := client.Ping(); err != nil {
-		return nil, fmt.Errorf("tuskd not responding: %w", err)
-	}
-
-	return mgr, nil
+	return nil, lastErr
 }
 
 func execLookPath(file string) (string, error) {

@@ -36,7 +36,7 @@
 
 ## Critical Risks
 
-- `Manager.Status()` uses `Process.Signal(os.Signal(nil))`; this pattern is not robust.
+- `Manager.Status()` now relies on PID/socket probing and can still report `stopped` if the socket is stale; `tusk stop` still kills QEMU directly without graceful QMP shutdown.
 - No graceful shutdown via QMP (`system_powerdown`); stop only kills process.
 - If serial socket is not yet available during `start`, CLI only gives a warning and continues.
-- Daemon default `socketPath` in VM is `/tusk/serial.sock`, while host targets `~/.tusk/vm/serial.sock`.
+- Daemon default `socketPath` in VM is now `/tusk/vm/serial.sock`, matching host target `~/.tusk/vm/serial.sock`.

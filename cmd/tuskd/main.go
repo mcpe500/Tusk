@@ -16,7 +16,7 @@ import (
 )
 
 var (
-	socketPath = "/tusk/serial.sock"
+	socketPath = "/tusk/vm/serial.sock"
 )
 
 func main() {
