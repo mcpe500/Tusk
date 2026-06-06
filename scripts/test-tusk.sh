@@ -38,7 +38,7 @@ fi
 
 # Test 3: Help command
 log_info "Test 3: Testing help command..."
-if $HOME/tusk-test --help 2>&1 | grep -q "Tusk - Container runtime"; then
+if $HOME/tusk-test --help 2>&1 | grep -q "Tusk: Hardware emulation for Termux"; then
     log_pass "Help command works"
 else
     log_fail "Help command failed"

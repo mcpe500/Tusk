@@ -1,6 +1,6 @@
 # Tusk 🔧
 
-**Container runtime for Termux using QEMU VMs — because Docker won't run on Android.**
+**Tusk: Hardware emulation for Termux, because sometimes working is better than fast.**
 
 [![Go](https://img.shields.io/badge/Go-1.22+-00ADD8?style=flat-square&logo=go)](https://golang.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)

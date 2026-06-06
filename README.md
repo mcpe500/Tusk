@@ -1,6 +1,6 @@
 # Tusk
 
-**Container runtime for Termux that uses a QEMU VM as a replacement for Docker.**
+**Tusk: Hardware emulation for Termux, because sometimes working is better than fast.**
 
 > "Docker can't run on Termux? Okay, let's build our own." — The original idea for this project.
 

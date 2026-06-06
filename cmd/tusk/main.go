@@ -80,7 +80,7 @@ func main() {
 
 func runVersion() {
 	fmt.Println("tusk version 0.1.0")
-	fmt.Println("Container runtime for Termux using QEMU VM")
+	fmt.Println("Tusk: Hardware emulation for Termux, because sometimes working is better than fast.")
 }
 
 func runUpdate() {
@@ -176,7 +176,7 @@ func runInstall() {
 }
 
 func printUsage() {
-	fmt.Println(`Tusk - Container runtime for Termux
+	fmt.Println(`Tusk: Hardware emulation for Termux, because sometimes working is better than fast.
 
 Usage:
   tusk version           Show version
