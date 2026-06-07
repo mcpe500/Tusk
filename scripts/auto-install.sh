@@ -155,7 +155,8 @@ run_installer() {
     rm -f "$INPUT_FIFO"
     mkfifo "$INPUT_FIFO"
 
-    # Start QEMU with serial output piped to auto-answer
+    # Start QEMU for installation
+    # Using console.sock for automated input
     qemu-system-x86_64 \
         -M pc-i440fx-9.2 \
         -m 1024 \
@@ -166,7 +167,7 @@ run_installer() {
         -netdev user,id=net0 \
         -device virtio-net-pci,netdev=net0 \
         -virtfs local,path="$TUSK_DIR",mount_tag=tusk-data,security_model=mapped \
-        -serial unix:"$SERIAL_SOCK",server,nowait \
+        -serial unix:"$CONSOLE_SOCK",server,nowait \
         2>&1 &
 
     QEMU_PID=$!
@@ -177,33 +178,33 @@ run_installer() {
         return 1
     fi
 
-    # Wait for serial socket to appear
-    log "Waiting for serial socket..."
+    # Wait for console socket to appear
+    log "Waiting for console socket..."
     for i in {1..30}; do
         if ! kill -0 "$QEMU_PID" 2>/dev/null; then
-            log "QEMU process ended before serial socket available"
+            log "QEMU process ended before console socket available"
             return 1
         fi
 
-        if [ -S "$SERIAL_SOCK" ]; then
+        if [ -S "$CONSOLE_SOCK" ]; then
             break
         fi
         sleep 1
     done
 
-    # Feed answers to the installer via serial
+    # Feed answers to the installer via console
     sleep 5  # Wait for boot
 
     log "Sending installation answers..."
 
     # Read and send each line with delay
     while IFS= read -r line; do
-        echo "$line" | nc -N "$SERIAL_SOCK" 2>/dev/null || true
+        echo "$line" | nc -N "$CONSOLE_SOCK" 2>/dev/null || true
         sleep 2  # Wait for each prompt
     done < "$ANSWERS_FILE"
 
     # Wait for installation to complete
-    log "Installation in progress... (this may take 5-10 minutes)"
+    log "Installation in progress... (this may take 10-20 minutes)"
 
     # Monitor for completion
     INSTALL_TIMEOUT=1200
@@ -215,8 +216,8 @@ run_installer() {
         fi
 
         # Try to detect installation completion
-        if [ -S "$SERIAL_SOCK" ]; then
-            echo "poweroff" | nc -N "$SERIAL_SOCK" 2>/dev/null || true
+        if [ -S "$CONSOLE_SOCK" ]; then
+            echo "poweroff" | nc -N "$CONSOLE_SOCK" 2>/dev/null || true
         fi
 
         sleep 10
@@ -280,7 +281,7 @@ configure_vm() {
 
     # Wait for boot
     log "Waiting for VM to boot..."
-    sleep 10
+    sleep 15
 
     # Wait for console socket
     for i in {1..120}; do
@@ -292,7 +293,7 @@ configure_vm() {
 
     log "VM booted. Sending configuration commands..."
 
-    # Send configure script via serial
+    # Send configure script via console
     {
         sleep 5
         echo ""
@@ -340,6 +341,7 @@ start() {
 
     ebegin "Starting tuskd"
     start-stop-daemon --start --background --make-pidfile --pidfile $pidfile \
+        --stdout /var/log/tuskd.log --stderr /var/log/tuskd.log \
         --exec $command -- $command_args
     eend $?
 }
@@ -371,7 +373,7 @@ CONFIG_SCRIPT
     } &
 
     # Wait for configuration
-    log "Configuring... (this may take a few minutes)"
+    log "Configuring... (this may take 2-4 minutes)"
     sleep 120
 
     # Kill VM
@@ -417,13 +419,17 @@ start_vm() {
 
     log "VM started (PID: $VM_PID)"
     log "Waiting for tuskd..."
-    sleep 5
+    
+    # Wait for boot
+    sleep 10
 
-    # Test tuskd
+    # Test tuskd with robust loop
     for i in {1..120}; do
         if [ -S "$SERIAL_SOCK" ]; then
-            if echo '{"jsonrpc":"2.0","method":"Ping","params":{},"id":1}' | \
-                nc -N "$SERIAL_SOCK" -w 2 | grep -q "pong\|result"; then
+            # Use nc to check if tuskd is responding
+            RESPONSE=$(echo '{"jsonrpc":"2.0","method":"Ping","params":{},"id":1}' | \
+                nc -N "$SERIAL_SOCK" -w 5 2>/dev/null)
+            if echo "$RESPONSE" | grep -q "pong\|result"; then
                 log "tuskd responding!"
                 return 0
             fi
@@ -431,7 +437,8 @@ start_vm() {
         sleep 1
     done
 
-    warn "tuskd not responding"
+    warn "tuskd not responding yet"
+    log "Check logs with: tusk vm attach"
     return 1
 }
 

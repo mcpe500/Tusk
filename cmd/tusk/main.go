@@ -373,7 +373,8 @@ func runStatus() {
 
 	fmt.Printf("VM Status: %s\n", status)
 	fmt.Printf("QMP Socket: %s\n", mgr.QMPSocket())
-	fmt.Printf("Serial Socket: %s\n", mgr.SerialSocket())
+	fmt.Printf("Serial Socket (API): %s\n", mgr.SerialSocket())
+	fmt.Printf("Console Socket: %s\n", mgr.ConsoleSocket())
 
 	if mgr.QMPSocketExists() {
 		qmp, err := mgr.WaitForQMP(5 * 1e9)

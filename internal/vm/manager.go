@@ -305,6 +305,10 @@ func (m *Manager) SerialSocket() string {
 	return m.serialSock
 }
 
+func (m *Manager) ConsoleSocket() string {
+	return filepath.Join(m.vmDir, "console.sock")
+}
+
 func (m *Manager) QMPSocketExists() bool {
 	_, err := os.Stat(m.qmpSock)
 	return err == nil

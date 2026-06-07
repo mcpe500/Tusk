@@ -29,7 +29,8 @@ cat > "$TUSKD_INIT_SCRIPT" << 'TUSK_INIT'
 
 name=tuskd
 description="Tusk container runtime daemon"
-command="/tusk/tuskd-amd64"
+command="/usr/local/bin/tuskd"
+command_args="--device /dev/virtio-ports/tusk0"
 command_background=true
 pidfile="/run/tuskd.pid"
 
@@ -59,7 +60,8 @@ start() {
     # Start tuskd
     ebegin "Starting tuskd"
     start-stop-daemon --start --background --make-pidfile --pidfile $pidfile \
-        --exec /usr/local/bin/tuskd -- /usr/local/bin/tuskd
+        --stdout /var/log/tuskd.log --stderr /var/log/tuskd.log \
+        --exec $command -- $command_args
     eend $?
 }
 

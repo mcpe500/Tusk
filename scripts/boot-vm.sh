@@ -11,6 +11,7 @@ TUSKD_BINARY="$TUSK_DIR/tuskd-amd64"
 
 QMP_SOCK="$TUSK_DIR/vm/qmp.sock"
 SERIAL_SOCK="$TUSK_DIR/vm/serial.sock"
+CONSOLE_SOCK="$TUSK_DIR/vm/console.sock"
 
 # Defaults
 MODE="boot"  # boot, install, interactive
@@ -86,7 +87,10 @@ boot_from_disk() {
         -device virtio-net-pci,netdev=net0 \
         -virtfs local,path="$TUSK_DIR",mount_tag=tusk-data,security_model=mapped,id=tusk \
         -qmp unix:"$QMP_SOCK",server,nowait \
-        -serial unix:"$SERIAL_SOCK",server,nowait \
+        -device virtio-serial-pci \
+        -device virtserialport,chardev=ch0,name=tusk0 \
+        -chardev socket,id=ch0,path="$SERIAL_SOCK",server,nowait \
+        -serial unix:"$CONSOLE_SOCK",server,nowait \
         "$@"
 }
 
@@ -104,7 +108,10 @@ boot_from_iso() {
         -device virtio-net-pci,netdev=net0 \
         -virtfs local,path="$TUSK_DIR",mount_tag=tusk-data,security_model=mapped,id=tusk \
         -qmp unix:"$QMP_SOCK",server,nowait \
-        -serial unix:"$SERIAL_SOCK",server,nowait \
+        -device virtio-serial-pci \
+        -device virtserialport,chardev=ch0,name=tusk0 \
+        -chardev socket,id=ch0,path="$SERIAL_SOCK",server,nowait \
+        -serial unix:"$CONSOLE_SOCK",server,nowait \
         "$@"
 }
 

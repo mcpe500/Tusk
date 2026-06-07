@@ -143,18 +143,35 @@ func runDeviceDaemon(path string) {
 	fmt.Printf("Tuskd listening on device %s\n", path)
 	store := NewContainerStore("/tusk/containers")
 
+	// Possible paths for virtio-serial devices in Alpine
+	paths := []string{path}
+	if path == "/dev/virtio-ports/tusk0" {
+		paths = append(paths, "/dev/vport0p1", "/dev/vport0p2", "/dev/vport0p0")
+	}
+
 	for {
-		f, err := os.OpenFile(path, os.O_RDWR, 0666)
+		var f *os.File
+		var err error
+		var activePath string
+
+		for _, p := range paths {
+			f, err = os.OpenFile(p, os.O_RDWR, 0)
+			if err == nil {
+				activePath = p
+				break
+			}
+		}
+
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to open device %s: %v\n", path, err)
-			time.Sleep(2 * time.Second)
+			fmt.Fprintf(os.Stderr, "Failed to open any device (%v): %v\n", paths, err)
+			time.Sleep(5 * time.Second)
 			continue
 		}
 
-		fmt.Printf("Connected to device %s\n", path)
+		fmt.Printf("Connected to device %s\n", activePath)
 		handleStream(f, f, store)
 		f.Close()
-		fmt.Printf("Device %s closed, reconnecting...\n", path)
+		fmt.Printf("Device %s closed, reconnecting...\n", activePath)
 		time.Sleep(1 * time.Second)
 	}
 }
