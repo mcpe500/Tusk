@@ -37,12 +37,12 @@ func TestSerialClientWithGarbage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Send failed: %v", err)
 	}
-	
+
 	var resp map[string]interface{}
 	if err := json.Unmarshal(res, &resp); err != nil {
 		t.Fatalf("Unmarshal failed: %v", err)
 	}
-	
+
 	result, ok := resp["result"].(map[string]interface{})
 	if !ok || result["status"] != "pong" {
 		t.Fatalf("unexpected result: %v", resp["result"])
