@@ -9,6 +9,7 @@ DISK_IMAGE="$TUSK_DIR/vm/disk.qcow2"
 ALPINE_ISO="$HOME/alpine-virt-3.19.1-x86_64.iso"
 QMP_SOCK="$TUSK_DIR/vm/qmp.sock"
 SERIAL_SOCK="$TUSK_DIR/vm/serial.sock"
+CONSOLE_SOCK="$TUSK_DIR/vm/console.sock"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -54,7 +55,8 @@ EOF
     fi
 
     echo "QMP Socket: $QMP_SOCK"
-    echo "Serial Socket: $SERIAL_SOCK"
+    echo "Serial Socket (API): $SERIAL_SOCK"
+    echo "Console Socket: $CONSOLE_SOCK"
 }
 
 cmd_start() {
@@ -65,7 +67,7 @@ cmd_start() {
 
     # Kill existing VM
     pkill -f qemu 2>/dev/null || true
-    rm -f "$QMP_SOCK" "$SERIAL_SOCK" 2>/dev/null || true
+    rm -f "$QMP_SOCK" "$SERIAL_SOCK" "$CONSOLE_SOCK" 2>/dev/null || true
 
     qemu-system-x86_64 \
         -M pc-i440fx-9.2 \
@@ -77,7 +79,10 @@ cmd_start() {
         -device virtio-net-pci,netdev=net0 \
         -virtfs local,path="$TUSK_DIR",mount_tag=tusk-data,security_model=mapped,id=tusk \
         -qmp unix:"$QMP_SOCK",server,nowait \
-        -serial unix:"$SERIAL_SOCK",server,nowait &
+        -device virtio-serial-pci \
+        -device virtserialport,chardev=ch0,name=tusk0 \
+        -chardev socket,id=ch0,path="$SERIAL_SOCK",server,nowait \
+        -serial unix:"$CONSOLE_SOCK",server,nowait &
 
     log "VM started (PID: $!)"
     log "Waiting for boot..."
@@ -87,7 +92,7 @@ cmd_start() {
     python3 << EOF 2>/dev/null
 import socket, json, time, os
 
-for i in range(30):
+for i in range(120):
     try:
         s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         s.settimeout(1)
@@ -100,7 +105,7 @@ for i in range(30):
     except:
         time.sleep(1)
 
-if i == 29:
+if i == 119:
     print("tuskd: Not ready (Alpine may still be booting)")
 EOF
 }
@@ -108,7 +113,7 @@ EOF
 cmd_stop() {
     log "Stopping VM..."
     pkill -f qemu 2>/dev/null || true
-    rm -f "$QMP_SOCK" "$SERIAL_SOCK" 2>/dev/null || true
+    rm -f "$QMP_SOCK" "$SERIAL_SOCK" "$CONSOLE_SOCK" 2>/dev/null || true
     log "VM stopped"
 }
 
@@ -168,18 +173,18 @@ cmd_install() {
 cmd_attach() {
     check_qemu
 
-    if [ ! -S "$SERIAL_SOCK" ]; then
+    if [ ! -S "$CONSOLE_SOCK" ]; then
         error "VM not running. Run: tusk vm start"
         exit 1
     fi
 
     log "Connecting to serial console... (Ctrl+C to detach)"
-    exec socat - unix:"$SERIAL_SOCK" 2>/dev/null || \
+    exec socat - unix:"$CONSOLE_SOCK" 2>/dev/null || \
         python3 << EOF
 import socket, os, termios, tty
 
 s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-s.connect(os.path.expanduser("$SERIAL_SOCK"))
+s.connect(os.path.expanduser("$CONSOLE_SOCK"))
 
 # Simple read-only mode
 while True:

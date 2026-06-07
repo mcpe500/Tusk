@@ -24,7 +24,7 @@ type Client struct {
 func New(sockPath string) *Client {
 	return &Client{
 		sockPath: sockPath,
-		timeout:  30 * time.Second,
+		timeout:  120 * time.Second,
 	}
 }
 

@@ -88,12 +88,19 @@ func (m *Manager) Start(ctx context.Context, cfg *Config) error {
 	// QMP socket for VM control
 	args = append(args, "-qmp", fmt.Sprintf("unix:%s,server,nowait", m.qmpSock))
 
-	// virtio-serial for CLI communication (server mode so QEMU creates socket)
-	args = append(args, "-serial", fmt.Sprintf("unix:%s,server,nowait", m.serialSock))
+	// virtio-serial for CLI communication
+	args = append(args, "-device", "virtio-serial-pci")
+	args = append(args, "-device", "virtserialport,chardev=ch0,name=tusk0")
+	args = append(args, "-chardev", fmt.Sprintf("socket,id=ch0,path=%s,server,nowait", m.serialSock))
+
+	// Dedicated serial port for console/logs
+	consoleSock := filepath.Join(m.vmDir, "console.sock")
+	args = append(args, "-serial", fmt.Sprintf("unix:%s,server,nowait", consoleSock))
 
 	// Clean up stale sockets before starting a new VM process.
 	_ = os.Remove(m.qmpSock)
 	_ = os.Remove(m.serialSock)
+	_ = os.Remove(consoleSock)
 
 	// Network: user-mode NAT
 	args = append(args, "-netdev", "user,id=net0")

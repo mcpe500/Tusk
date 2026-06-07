@@ -147,7 +147,10 @@ start_vm() {
         -device virtio-net-pci,netdev=net0 \
         -virtfs local,path="$TUSK_DIR",mount_tag=tusk-data,security_model=mapped \
         -qmp unix:"$TUSK_DIR/vm/qmp.sock",server,nowait \
-        -serial unix:"$TUSK_DIR/vm/serial.sock",server,nowait &
+        -device virtio-serial-pci \
+        -device virtserialport,chardev=ch0,name=tusk0 \
+        -chardev socket,id=ch0,path="$TUSK_DIR/vm/serial.sock",server,nowait \
+        -serial unix:"$TUSK_DIR/vm/console.sock",server,nowait &
 
     QEMU_PID=$!
     if ! kill -0 "$QEMU_PID" 2>/dev/null; then

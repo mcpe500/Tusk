@@ -24,6 +24,7 @@ DISK_IMAGE="$TUSK_DIR/vm/disk.qcow2"
 ALPINE_ISO="$HOME/alpine-virt-3.19.1-x86_64.iso"
 QMP_SOCK="$TUSK_DIR/vm/qmp.sock"
 SERIAL_SOCK="$TUSK_DIR/vm/serial.sock"
+CONSOLE_SOCK="$TUSK_DIR/vm/console.sock"
 INPUT_FIFO=""
 
 # Auto-answer file for setup-alpine
@@ -99,7 +100,7 @@ download_iso() {
 cleanup() {
     log "Cleaning up..."
     pkill -f qemu 2>/dev/null || true
-    rm -f "$QMP_SOCK" "$SERIAL_SOCK" 2>/dev/null || true
+    rm -f "$QMP_SOCK" "$SERIAL_SOCK" "$CONSOLE_SOCK" 2>/dev/null || true
     rm -f "$ANSWERS_FILE" 2>/dev/null || true
     rm -f "$INPUT_FIFO" 2>/dev/null || true
 }
@@ -260,7 +261,10 @@ configure_vm() {
         -device virtio-net-pci,netdev=net0 \
         -virtfs local,path="$TUSK_DIR",mount_tag=tusk-data,security_model=mapped \
         -qmp unix:"$QMP_SOCK",server,nowait \
-        -serial unix:"$SERIAL_SOCK",server,nowait &
+        -device virtio-serial-pci \
+        -device virtserialport,chardev=ch0,name=tusk0 \
+        -chardev socket,id=ch0,path="$SERIAL_SOCK",server,nowait \
+        -serial unix:"$CONSOLE_SOCK",server,nowait &
 
     VM_PID=$!
     if ! kill -0 "$VM_PID" 2>/dev/null; then
@@ -270,17 +274,17 @@ configure_vm() {
 
     log "VM started for configuration (PID: $VM_PID)"
 
-    if [ ! -S "$SERIAL_SOCK" ]; then
-        warn "Serial socket did not appear; configuration may fail"
+    if [ ! -S "$CONSOLE_SOCK" ]; then
+        warn "Console socket did not appear; configuration may fail"
     fi
 
     # Wait for boot
     log "Waiting for VM to boot..."
     sleep 10
 
-    # Wait for serial socket
-    for i in {1..60}; do
-        if [ -S "$SERIAL_SOCK" ]; then
+    # Wait for console socket
+    for i in {1..120}; do
+        if [ -S "$CONSOLE_SOCK" ]; then
             break
         fi
         sleep 1
@@ -290,22 +294,22 @@ configure_vm() {
 
     # Send configure script via serial
     {
-        sleep 3
+        sleep 5
         echo ""
         sleep 2
 
         # Create tuskd init script directly
-        cat << 'CONFIG_SCRIPT' | nc -N "$SERIAL_SOCK" 2>/dev/null || true
+        cat << 'CONFIG_SCRIPT' | nc -N "$CONSOLE_SOCK" 2>/dev/null || true
 
 # Wait for login
 sleep 5
 
 # Login
-echo "root" | nc -N "$SERIAL_SOCK" 2>/dev/null || true
+echo "root" | nc -N "$CONSOLE_SOCK" 2>/dev/null || true
 sleep 2
 
 # Set password (simple for auto-setup)
-echo "echo 'root:tusk' | chpasswd" | nc -N "$SERIAL_SOCK" 2>/dev/null || true
+echo "echo 'root:tusk' | chpasswd" | nc -N "$CONSOLE_SOCK" 2>/dev/null || true
 sleep 1
 
 # Create tuskd init script
@@ -313,7 +317,8 @@ cat > /etc/init.d/tuskd << 'TUSKD_EOF'
 #!/bin/sh
 name=tuskd
 description="Tusk container runtime daemon"
-command="/tusk/tuskd-amd64"
+command="/usr/local/bin/tuskd"
+command_args="--device /dev/virtio-ports/tusk0"
 command_background=true
 pidfile="/run/tuskd.pid"
 
@@ -335,7 +340,7 @@ start() {
 
     ebegin "Starting tuskd"
     start-stop-daemon --start --background --make-pidfile --pidfile $pidfile \
-        --exec /usr/local/bin/tuskd -- /usr/local/bin/tuskd
+        --exec $command -- $command_args
     eend $?
 }
 
@@ -367,7 +372,7 @@ CONFIG_SCRIPT
 
     # Wait for configuration
     log "Configuring... (this may take a few minutes)"
-    sleep 60
+    sleep 120
 
     # Kill VM
     if kill -0 $VM_PID 2>/dev/null; then
@@ -399,7 +404,10 @@ start_vm() {
         -device virtio-net-pci,netdev=net0 \
         -virtfs local,path="$TUSK_DIR",mount_tag=tusk-data,security_model=mapped \
         -qmp unix:"$QMP_SOCK",server,nowait \
-        -serial unix:"$SERIAL_SOCK",server,nowait &
+        -device virtio-serial-pci \
+        -device virtserialport,chardev=ch0,name=tusk0 \
+        -chardev socket,id=ch0,path="$SERIAL_SOCK",server,nowait \
+        -serial unix:"$CONSOLE_SOCK",server,nowait &
 
     VM_PID=$!
     if ! kill -0 "$VM_PID" 2>/dev/null; then
@@ -408,19 +416,20 @@ start_vm() {
     fi
 
     log "VM started (PID: $VM_PID)"
+    log "Waiting for tuskd..."
     sleep 5
 
     # Test tuskd
-    if [ -S "$SERIAL_SOCK" ]; then
-        log "Testing tuskd..."
-        if echo '{"jsonrpc":"2.0","method":"Ping","params":{},"id":1}' | \
-            nc -N "$SERIAL_SOCK" -w 2 | grep -q "pong\|result"; then
-            log "tuskd responding!"
-            return 0
+    for i in {1..120}; do
+        if [ -S "$SERIAL_SOCK" ]; then
+            if echo '{"jsonrpc":"2.0","method":"Ping","params":{},"id":1}' | \
+                nc -N "$SERIAL_SOCK" -w 2 | grep -q "pong\|result"; then
+                log "tuskd responding!"
+                return 0
+            fi
         fi
-        warn "tuskd not responding yet (VM may still be booting)"
-        return 1
-    fi
+        sleep 1
+    done
 
     warn "tuskd not responding"
     return 1

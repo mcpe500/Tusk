@@ -21,15 +21,26 @@ var (
 )
 
 func main() {
+	var devicePath string
+	for i, arg := range os.Args {
+		if arg == "--device" && i+1 < len(os.Args) {
+			devicePath = os.Args[i+1]
+		}
+	}
+
 	// Check if running in VM or simulation mode
-	if _, err := os.Stat("/tusk"); os.IsNotExist(err) {
+	if _, err := os.Stat("/tusk"); os.IsNotExist(err) && devicePath == "" {
 		// Simulation mode for testing
 		runSimulationMode()
 		return
 	}
 
 	// Production mode - run as daemon
-	runDaemon()
+	if devicePath != "" {
+		runDeviceDaemon(devicePath)
+	} else {
+		runDaemon()
+	}
 }
 
 func runSimulationMode() {
@@ -121,15 +132,36 @@ func runDaemon() {
 		if err != nil {
 			continue
 		}
-		go handleConnection(conn, store)
+		go func(c net.Conn) {
+			defer c.Close()
+			handleStream(c, c, store)
+		}(conn)
 	}
 }
 
-func handleConnection(conn net.Conn, store *ContainerStore) {
-	defer conn.Close()
+func runDeviceDaemon(path string) {
+	fmt.Printf("Tuskd listening on device %s\n", path)
+	store := NewContainerStore("/tusk/containers")
 
-	reader := bufio.NewReader(conn)
-	enc := json.NewEncoder(conn)
+	for {
+		f, err := os.OpenFile(path, os.O_RDWR, 0666)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to open device %s: %v\n", path, err)
+			time.Sleep(2 * time.Second)
+			continue
+		}
+
+		fmt.Printf("Connected to device %s\n", path)
+		handleStream(f, f, store)
+		f.Close()
+		fmt.Printf("Device %s closed, reconnecting...\n", path)
+		time.Sleep(1 * time.Second)
+	}
+}
+
+func handleStream(r io.Reader, w io.Writer, store *ContainerStore) {
+	reader := bufio.NewReader(r)
+	enc := json.NewEncoder(w)
 
 	for {
 		raw, err := readJSONObject(reader)
