@@ -58,6 +58,8 @@ func main() {
 		runStop()
 	case "status":
 		runStatus()
+	case "uninstall":
+		runUninstall()
 	case "pull":
 		if len(os.Args) < 3 {
 			fmt.Println("Usage: tusk pull <image>")
@@ -269,6 +271,7 @@ Usage:
   tusk start             Start the Tusk VM
   tusk stop              Stop the Tusk VM
   tusk status            Show VM status
+  tusk uninstall         Uninstall Tusk and delete all data
 
   tusk pull <image>      Pull image from registry
   tusk images            List local images
@@ -383,6 +386,63 @@ func runStatus() {
 			fmt.Println("QMP: Connected")
 		}
 	}
+}
+
+func runUninstall() {
+	fmt.Println("==================================")
+	fmt.Println("  Tusk Uninstaller")
+	fmt.Println("==================================")
+	fmt.Println("")
+	fmt.Println("WARNING: This will delete:")
+	fmt.Printf("1. Tusk data directory (%s) - Includes VM disks and containers!\n", tuskDir)
+	fmt.Printf("2. Tusk binary (%s)\n", filepath.Join(os.Getenv("HOME"), "tusk"))
+	fmt.Printf("3. Tusk source repository (%s)\n", filepath.Join(os.Getenv("HOME"), "Tusk"))
+	fmt.Println("")
+	fmt.Print("Are you sure you want to proceed? (y/N): ")
+
+	var confirm string
+	fmt.Scanln(&confirm)
+	if strings.ToLower(strings.TrimSpace(confirm)) != "y" {
+		fmt.Println("Uninstall cancelled.")
+		return
+	}
+
+	mgr := vm.New(tuskDir)
+	fmt.Println("Stopping Tusk VM if running...")
+	_ = mgr.Stop()
+
+	// Give QEMU a moment to exit
+	time.Sleep(1 * time.Second)
+	// Force kill if still there
+	pkill := exec.Command("pkill", "-f", "qemu-system-x86_64")
+	_ = pkill.Run()
+
+	fmt.Println("Removing tusk data directory...")
+	if err := os.RemoveAll(tuskDir); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to remove data directory: %v\n", err)
+	}
+
+	tuskBin := filepath.Join(os.Getenv("HOME"), "tusk")
+	fmt.Println("Removing tusk binary...")
+	if err := os.Remove(tuskBin); err != nil && !os.IsNotExist(err) {
+		fmt.Fprintf(os.Stderr, "Warning: failed to remove tusk binary: %v\n", err)
+	}
+
+	tuskSource := filepath.Join(os.Getenv("HOME"), "Tusk")
+	fmt.Println("Removing tusk source repository...")
+	if err := os.RemoveAll(tuskSource); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to remove source repository: %v\n", err)
+	}
+
+	// Also remove Alpine ISOs
+	fmt.Println("Removing Alpine ISO files...")
+	files, _ := filepath.Glob(filepath.Join(os.Getenv("HOME"), "alpine-virt-*.iso"))
+	for _, f := range files {
+		_ = os.Remove(f)
+	}
+
+	fmt.Println("\nTusk uninstalled successfully!")
+	fmt.Println("Note: If you added '~/tusk' to your PATH manually, you may want to remove it from your .bashrc/.zshrc.")
 }
 
 func runPull(ref string) {
