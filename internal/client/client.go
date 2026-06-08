@@ -28,6 +28,10 @@ func New(sockPath string) *Client {
 	}
 }
 
+func (c *Client) SetTimeout(d time.Duration) {
+	c.timeout = d
+}
+
 func (c *Client) Connect() error {
 	conn, err := net.DialTimeout("unix", c.sockPath, 5*time.Second)
 	if err != nil {

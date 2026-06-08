@@ -4,12 +4,42 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/tusk/tusk/pkg/types"
 )
+
+func runSimulationSocket(sockPath string) {
+	fmt.Fprintf(os.Stderr, "=== Tuskd Simulation Mode (socket) ===\n")
+	fmt.Fprintf(os.Stderr, "Listening on: %s\n", sockPath)
+	fmt.Fprintf(os.Stderr, "Commands will be processed but containers won't actually run.\n")
+
+	os.MkdirAll(filepath.Dir(sockPath), 0755)
+	os.Remove(sockPath)
+
+	ln, err := net.Listen("unix", sockPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to listen on %s: %v\n", sockPath, err)
+		os.Exit(1)
+	}
+	defer ln.Close()
+
+	store := NewContainerStore(filepath.Join(os.Getenv("HOME"), ".tusk", "containers"))
+
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			continue
+		}
+		go func(c net.Conn) {
+			defer c.Close()
+			handleStream(c, c, store)
+		}(conn)
+	}
+}
 
 func runSimulationMode() {
 	fmt.Println("=== Tuskd Simulation Mode ===")
