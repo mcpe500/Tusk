@@ -38,6 +38,7 @@ type ContainerCreateParams struct {
 	Command  []string          `json:"command,omitempty"`
 	Env      []string          `json:"env,omitempty"`
 	Mounts   []MountParams     `json:"mounts,omitempty"`
+	Ports    []string          `json:"ports,omitempty"`
 	Network  string            `json:"network,omitempty"`
 	Labels   map[string]string `json:"labels,omitempty"`
 }

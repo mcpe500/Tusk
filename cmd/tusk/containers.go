@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/tusk/tusk/internal/client"
 	"github.com/tusk/tusk/pkg/protocol"
@@ -17,6 +16,8 @@ func runRun() {
 	var detach bool
 	var name string
 	var envVars []string
+	var volumes []string
+	var ports []string
 
 	args := os.Args[2:]
 	i := 0
@@ -40,19 +41,32 @@ func runRun() {
 			}
 			envVars = append(envVars, args[i+1])
 			i += 2
+		case "-v", "--volume":
+			if i+1 >= len(args) {
+				fmt.Fprintf(os.Stderr, "Error: -v/--volume requires a value\n")
+				os.Exit(1)
+			}
+			volumes = append(volumes, args[i+1])
+			i += 2
+		case "-p", "--publish":
+			if i+1 >= len(args) {
+				fmt.Fprintf(os.Stderr, "Error: -p/--publish requires a value\n")
+				os.Exit(1)
+			}
+			ports = append(ports, args[i+1])
+			i += 2
 		case "-i", "-t", "--interactive", "--tty":
 			i++
-		case "-v", "--volume", "-p", "--publish":
-			i += 2
 		default:
 			if !strings.HasPrefix(arg, "-") {
 				imageName = arg
 				cmdArgs = args[i+1:]
-				break
+				goto doneParse
 			}
 			i++
 		}
 	}
+doneParse:
 
 	if imageName == "" {
 		fmt.Fprintf(os.Stderr, "Error: image name required\n")
@@ -73,29 +87,47 @@ func runRun() {
 		os.Exit(1)
 	}
 
-	params := &protocol.ContainerCreateParams{Image: imageName, Name: name, Command: cmdArgs, Env: envVars}
+	// Convert -v flags to MountParams for daemon.
+	var mounts []protocol.MountParams
+	for _, v := range volumes {
+		m := parseCLIMount(v)
+		if m != nil {
+			mounts = append(mounts, *m)
+		}
+	}
+
+	params := &protocol.ContainerCreateParams{
+		Image:   imageName,
+		Name:    name,
+		Command: cmdArgs,
+		Env:     envVars,
+		Mounts:  mounts,
+		Ports:   ports,
+	}
 	result, err := cli.ContainerCreate(params)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: failed to create container: %v\n", err)
 		os.Exit(1)
 	}
 
-	if err := cli.ContainerStart(result.ID); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: failed to start container: %v\n", err)
-		os.Exit(1)
-	}
-
 	if detach {
-		fmt.Printf("Container %s started (PID: %d)\n", result.ID[:12], result.Pid)
+		// Detached: just start in background, don't exec.
+		if err := cli.ContainerStart(result.ID); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: failed to start container: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("%s\n", result.ID)
 		return
 	}
 
-	time.Sleep(500 * time.Millisecond)
+	// Foreground: use ContainerExec so output comes directly to stdout.
 	execResult, _ := cli.ContainerExec(result.ID, cmdArgs)
 	if execResult.ExitCode != 0 {
 		fmt.Print(execResult.Stderr)
 	}
 	fmt.Print(execResult.Stdout)
+	// Clean up ephemeral container after foreground run.
+	_ = cli.ContainerRemove(result.ID, true)
 	os.Exit(execResult.ExitCode)
 }
 
@@ -240,4 +272,21 @@ func runContainerStop(id string) {
 		os.Exit(1)
 	}
 	fmt.Printf("Container %s stopped\n", id)
+}
+
+// parseCLIMount parses a -v flag value into a MountParams.
+// Formats: "host:container", "host:container:ro", "container" (anon skip).
+func parseCLIMount(v string) *protocol.MountParams {
+	parts := strings.SplitN(v, ":", 3)
+	switch len(parts) {
+	case 1:
+		// anonymous volume — no host path, skip
+		return nil
+	case 2:
+		return &protocol.MountParams{Type: "bind", Source: parts[0], Destination: parts[1]}
+	case 3:
+		ro := parts[2] == "ro" || parts[2] == "readonly"
+		return &protocol.MountParams{Type: "bind", Source: parts[0], Destination: parts[1], ReadOnly: ro}
+	}
+	return nil
 }

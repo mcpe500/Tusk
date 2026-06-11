@@ -51,3 +51,5 @@ temp/
 
 # opencode session state
 .opencode/
+.skynex/production-gate.json
+.skynex/audit.log

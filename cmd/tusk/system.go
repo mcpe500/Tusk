@@ -1,22 +1,21 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/tusk/tusk/internal/client"
 	"github.com/tusk/tusk/internal/image"
-	"github.com/tusk/tusk/internal/vm"
 )
 
 func runVersion() {
 	fmt.Println("tusk version 0.1.0")
-	fmt.Println("Tusk: Hardware emulation for Termux, because sometimes working is better than fast.")
+	fmt.Println("Tusk: Native container runtime for Termux/Android.")
 }
 
 func runUpdate() {
@@ -48,17 +47,10 @@ func runUpdate() {
 		os.Exit(1)
 	}
 
-	fmt.Println("Building tuskd (x86_64)...")
-	tuskdBin := filepath.Join(os.Getenv("HOME"), ".tusk", "tuskd-amd64")
+	fmt.Println("Building tuskd (native)...")
+	tuskdBin := filepath.Join(os.Getenv("HOME"), ".tusk", "tuskd")
 	cmd = exec.Command("go", "build", "-ldflags=-s -w", "-o", tuskdBin, "./cmd/tuskd")
 	cmd.Dir = tuskRepo
-	cmd.Env = []string{
-		"GOOS=linux",
-		"GOARCH=amd64",
-		"CGO_ENABLED=0",
-		"PATH=" + os.Getenv("PATH"),
-		"HOME=" + os.Getenv("HOME"),
-	}
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -72,83 +64,30 @@ func runUpdate() {
 }
 
 func runInstall() {
-	installArgs := os.Args[2:]
-	verbose := false
-	scriptArgs := make([]string, 0, len(installArgs))
 
-	for _, arg := range installArgs {
-		switch arg {
-		case "--verbose", "-v":
-			verbose = true
-		default:
-			scriptArgs = append(scriptArgs, arg)
-		}
-	}
-
-	fmt.Println("Tusk Installer")
-	fmt.Println("")
-	fmt.Println("This will:")
-	fmt.Println("1. Download pre-built Alpine VM with tuskd")
-	fmt.Println("2. Start the VM automatically")
-	fmt.Println("")
-	fmt.Println("If download fails, it will build from scratch.")
-	fmt.Println("")
-
-	if verbose {
-		fmt.Println("Running with verbose logs enabled")
-	}
-
-	scriptPath := filepath.Join(os.Getenv("HOME"), "Tusk", "scripts", "prebuilt-install.sh")
-	if verbose {
-		fmt.Printf("Executing: bash %s %s\n", scriptPath, strings.Join(scriptArgs, " "))
-	}
-
-	cmd := exec.Command("bash", append([]string{scriptPath}, scriptArgs...)...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
-
-	if err := cmd.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "Pre-built download failed, trying build from scratch...\n")
-		autoScript := filepath.Join(os.Getenv("HOME"), "Tusk", "scripts", "auto-install.sh")
-		if verbose {
-			fmt.Printf("Executing: bash %s %s\n", autoScript, strings.Join(scriptArgs, " "))
-		}
-		cmd = exec.Command("bash", append([]string{autoScript}, scriptArgs...)...)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		cmd.Stdin = os.Stdin
-		if err := cmd.Run(); err != nil {
-			fmt.Fprintf(os.Stderr, "Install failed: %v\n", err)
-			os.Exit(1)
-		}
-	}
-
-	if err := verifyInstallation(verbose); err != nil {
-		fmt.Fprintf(os.Stderr, "Install verification failed: %v\n", err)
-		os.Exit(1)
-	}
-
-	fmt.Println("Tusk installed and ready.")
+	fmt.Println("tusk install: Use the install.sh script instead:")
+	fmt.Println("  curl -fsSL https://raw.githubusercontent.com/mcpe500/Tusk/main/scripts/install.sh | bash")
 }
 
 func verifyInstallation(verbose bool) error {
-	mgr := vm.New(tuskDir)
+	sockPath := filepath.Join(tuskDir, "vm", "serial.sock")
 	if verbose {
 		fmt.Println("Verifying tuskd socket and RPC readiness...")
 	}
 
-	conn, err := mgr.WaitForSerial(20 * time.Second)
-	if err != nil {
-		return fmt.Errorf("serial socket not available: %w", err)
-	}
-	if conn != nil {
-		if closeErr := conn.Close(); closeErr != nil && verbose {
-			fmt.Fprintf(os.Stderr, "Warning: failed to close serial probe connection: %v\n", closeErr)
+	// Wait up to 20s for socket to appear.
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(sockPath); err == nil {
+			break
 		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	if _, err := os.Stat(sockPath); err != nil {
+		return fmt.Errorf("tuskd socket not found at %s", sockPath)
 	}
 
-	c := client.New(mgr.SerialSocket())
+	c := client.New(sockPath)
 	if err := c.Connect(); err != nil {
 		return fmt.Errorf("failed to connect to tuskd: %w", err)
 	}
@@ -158,7 +97,7 @@ func verifyInstallation(verbose bool) error {
 		return fmt.Errorf("tuskd ping failed: %w", err)
 	}
 	if verbose {
-		fmt.Println("tuskd is responding over serial RPC")
+		fmt.Println("tuskd is responding over RPC")
 	}
 	return nil
 }
@@ -172,10 +111,14 @@ func runInit() {
 		os.Exit(1)
 	}
 
-	mgr := vm.New(tuskDir)
-	if err := mgr.Init(); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to init VM manager: %v\n", err)
-		os.Exit(1)
+	// Create required data directories.
+	for _, dir := range []string{
+		filepath.Join(tuskDir, "vm"),
+		filepath.Join(tuskDir, "containers"),
+		filepath.Join(tuskDir, "volumes"),
+		filepath.Join(tuskDir, "tmp"),
+	} {
+		_ = os.MkdirAll(dir, 0755)
 	}
 
 	fmt.Println("Tusk initialized successfully!")
@@ -183,72 +126,22 @@ func runInit() {
 }
 
 func runStart() {
-	fmt.Println("Starting Tusk VM...")
-
-	// Check for --simulation flag
-	for _, arg := range os.Args[2:] {
-		if arg == "--simulation" {
-			startSimulation()
-			return
-		}
-	}
-
-	// Check if a usable disk image exists (> 50MB = real install)
-	diskPath := filepath.Join(tuskDir, "vm", "disk.qcow2")
-	fi, err := os.Stat(diskPath)
-	if err != nil || fi.Size() < 50*1024*1024 {
-		fmt.Fprintf(os.Stderr, "No bootable VM disk found. Starting in simulation mode.\n")
-		fmt.Fprintf(os.Stderr, "Run 'tusk install' first to set up a real VM.\n")
-		startSimulation()
-		return
-	}
-
-	mgr := vm.New(tuskDir)
-	ctx := context.Background()
-	cfg := &vm.Config{Memory: 512, CPUs: 2, DiskPath: diskPath}
-
-	if err := mgr.Start(ctx, cfg); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to start VM: %v\n", err)
-		fmt.Fprintf(os.Stderr, "Falling back to simulation mode.\n")
-		startSimulation()
-		return
-	}
-
-	fmt.Println("VM started. Waiting for tuskd...")
-	conn, err := mgr.WaitForSerial(60 * time.Second)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: serial socket not available: %v\n", err)
-		fmt.Println("VM started. Connect to serial socket manually to interact with tuskd.")
-		return
-	}
-	conn.Close()
-
-	cli := client.New(mgr.SerialSocket())
-	if err := cli.Connect(); err == nil {
-		if err := cli.Ping(); err == nil {
-			fmt.Println("Tusk VM is ready!")
-			cli.Close()
-			return
-		}
-		cli.Close()
-	}
-
-	fmt.Println("VM started but tuskd not responding yet.")
-	fmt.Println("Run 'tusk status' to check VM status.")
+	fmt.Println("Starting Tusk daemon...")
+	startNativeDaemon()
 }
 
-// startSimulation launches tuskd-local in simulation socket mode.
-func startSimulation() {
+// startNativeDaemon launches tuskd (proot runtime) on the native socket.
+func startNativeDaemon() {
 	sockPath := filepath.Join(tuskDir, "vm", "serial.sock")
 	os.MkdirAll(filepath.Dir(sockPath), 0755)
 
-	// Check if already running
+	// Already running?
 	if _, err := os.Stat(sockPath); err == nil {
 		cli := client.New(sockPath)
 		cli.SetTimeout(2 * time.Second)
 		if err := cli.Connect(); err == nil {
 			if err := cli.Ping(); err == nil {
-				fmt.Println("Tusk simulation mode already running.")
+				fmt.Println("Tusk daemon already running.")
 				cli.Close()
 				return
 			}
@@ -257,15 +150,15 @@ func startSimulation() {
 		os.Remove(sockPath)
 	}
 
-	// Find or build tuskd binary (native ARM for simulation)
-	tuskdPath := filepath.Join(tuskDir, "tuskd-local")
+	// Prefer installed binary; fall back to building from source.
+	tuskdPath := filepath.Join(tuskDir, "tuskd")
 	if _, err := os.Stat(tuskdPath); err != nil {
 		repo := filepath.Join(os.Getenv("HOME"), "Tusk")
 		if _, err := os.Stat(filepath.Join(repo, "cmd", "tuskd")); err == nil {
-			fmt.Println("Building tuskd for simulation mode...")
-			cmd := exec.Command("go", "build", "-o", tuskdPath, "./cmd/tuskd")
-			cmd.Dir = repo
-			if err := cmd.Run(); err != nil {
+			fmt.Println("Building tuskd...")
+			build := exec.Command("go", "build", "-o", tuskdPath, "./cmd/tuskd")
+			build.Dir = repo
+			if err := build.Run(); err != nil {
 				fmt.Fprintf(os.Stderr, "Failed to build tuskd: %v\n", err)
 				os.Exit(1)
 			}
@@ -273,27 +166,38 @@ func startSimulation() {
 	}
 
 	if _, err := os.Stat(tuskdPath); err != nil {
-		fmt.Fprintf(os.Stderr, "tuskd binary not found at %s\n", tuskdPath)
+		fmt.Fprintf(os.Stderr, "tuskd not found at %s — run the installer first\n", tuskdPath)
 		os.Exit(1)
 	}
 
-	fmt.Println("Starting tuskd in simulation mode...")
+	logPath := filepath.Join(tuskDir, "tuskd.log")
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Cannot open log file: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Println("Starting tuskd (proot runtime)...")
 	cmd := exec.Command(tuskdPath, "--socket", sockPath)
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
+		logFile.Close()
 		fmt.Fprintf(os.Stderr, "Failed to start tuskd: %v\n", err)
 		os.Exit(1)
 	}
+	logFile.Close()
 
-	// Wait for socket
-	deadline := time.Now().Add(10 * time.Second)
+	// Wait for socket to appear and respond.
+	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		if _, err := os.Stat(sockPath); err == nil {
 			cli := client.New(sockPath)
 			if err := cli.Connect(); err == nil {
 				if err := cli.Ping(); err == nil {
-					fmt.Printf("Tusk simulation mode ready! (PID: %d)\n", cmd.Process.Pid)
+					fmt.Printf("Tusk daemon ready! (PID: %d)\n", cmd.Process.Pid)
+					fmt.Printf("Log: %s\n", logPath)
 					cli.Close()
 					return
 				}
@@ -302,51 +206,38 @@ func startSimulation() {
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	fmt.Fprintf(os.Stderr, "Simulation mode failed to start.\n")
+	fmt.Fprintf(os.Stderr, "Daemon did not respond in time. Check %s\n", logPath)
 	os.Exit(1)
 }
 
 func runStop() {
-	fmt.Println("Stopping Tusk VM...")
-	mgr := vm.New(tuskDir)
-	_ = mgr.Stop()
-
-	// Also kill simulation tuskd
-	exec.Command("pkill", "-f", "tuskd-local").Run()
 	exec.Command("pkill", "-f", "tuskd").Run()
-
-	fmt.Println("VM stopped.")
+	os.Remove(filepath.Join(tuskDir, "vm", "serial.sock"))
+	fmt.Println("Tusk daemon stopped.")
 }
 
 func runStatus() {
-	mgr := vm.New(tuskDir)
-	status := mgr.Status()
-
-	fmt.Printf("VM Status: %s\n", status)
-	fmt.Printf("QMP Socket: %s\n", mgr.QMPSocket())
-	fmt.Printf("Serial Socket (API): %s\n", mgr.SerialSocket())
-	fmt.Printf("Console Socket: %s\n", mgr.ConsoleSocket())
-
-	if mgr.QMPSocketExists() {
-		qmp, err := mgr.WaitForQMP(5 * time.Second)
-		if err == nil {
-			qmp.Close()
-			fmt.Println("QMP: Connected")
-		}
+	sockPath := filepath.Join(tuskDir, "vm", "serial.sock")
+	if _, err := os.Stat(sockPath); err != nil {
+		fmt.Println("Tusk daemon: not running")
+		fmt.Printf("Socket: %s (missing)\n", sockPath)
+		return
 	}
 
-	// Check simulation mode
-	serialSock := mgr.SerialSocket()
-	if _, err := os.Stat(serialSock); err == nil {
-		cli := client.New(serialSock)
-		cli.SetTimeout(2 * time.Second)
-		if err := cli.Connect(); err == nil {
-			if err := cli.Ping(); err == nil {
-				fmt.Println("tuskd: responding (simulation mode)")
-			}
-			cli.Close()
-		}
+	cli := client.New(sockPath)
+	cli.SetTimeout(2 * time.Second)
+	if err := cli.Connect(); err != nil {
+		fmt.Printf("Tusk daemon: socket present but not connectable: %v\n", err)
+		return
 	}
+	defer cli.Close()
+
+	if err := cli.Ping(); err != nil {
+		fmt.Printf("Tusk daemon: not responding: %v\n", err)
+		return
+	}
+	fmt.Println("Tusk daemon: running (proot runtime)")
+	fmt.Printf("Socket: %s\n", sockPath)
 }
 
 func runUninstall() {
@@ -363,7 +254,7 @@ func runUninstall() {
 	fmt.Println("==================================")
 	fmt.Println("")
 	fmt.Println("WARNING: This will delete:")
-	fmt.Printf("1. Tusk data directory (%s) - Includes VM disks and containers!\n", tuskDir)
+	fmt.Printf("1. Tusk data directory (%s) - Includes images and containers!\n", tuskDir)
 	fmt.Printf("2. Tusk binary (%s)\n", filepath.Join(os.Getenv("HOME"), "tusk"))
 	fmt.Printf("3. Tusk source repository (%s)\n", filepath.Join(os.Getenv("HOME"), "Tusk"))
 	fmt.Println("")
@@ -378,13 +269,8 @@ func runUninstall() {
 		}
 	}
 
-	mgr := vm.New(tuskDir)
-	fmt.Println("Stopping Tusk VM if running...")
-	_ = mgr.Stop()
-
-	time.Sleep(1 * time.Second)
-	exec.Command("pkill", "-f", "qemu-system-x86_64").Run()
 	exec.Command("pkill", "-f", "tuskd").Run()
+	time.Sleep(500 * time.Millisecond)
 
 	fmt.Println("Removing tusk data directory...")
 	if err := os.RemoveAll(tuskDir); err != nil {
@@ -403,58 +289,44 @@ func runUninstall() {
 		fmt.Fprintf(os.Stderr, "Warning: failed to remove source repository: %v\n", err)
 	}
 
-	fmt.Println("Removing Alpine ISO files...")
-	files, _ := filepath.Glob(filepath.Join(os.Getenv("HOME"), "alpine-virt-*.iso"))
-	for _, f := range files {
-		_ = os.Remove(f)
-	}
-
 	fmt.Println("\nTusk uninstalled successfully!")
 	fmt.Println("Note: If you added '~/tusk' to your PATH manually, you may want to remove it from your .bashrc/.zshrc.")
 }
 
-func ensureVM() (*vm.Manager, error) {
-	mgr := vm.New(tuskDir)
-	deadline := time.Now().Add(2 * time.Minute)
-	var lastErr error
-
-	for time.Now().Before(deadline) {
-		// Accept either a full QEMU VM (QMP + serial) or a standalone
-		// tuskd simulation socket (serial only, no QMP).
-		serialOK := false
-		if _, err := os.Stat(mgr.SerialSocket()); err == nil {
-			serialOK = true
-		}
-		if !mgr.QMPSocketExists() && !serialOK {
-			lastErr = fmt.Errorf("VM not running. Run 'tusk start' first.")
-			time.Sleep(200 * time.Millisecond)
-			continue
-		}
-
-		cli := client.New(mgr.SerialSocket())
-		cli.SetTimeout(5 * time.Second)
-		if err := cli.Connect(); err != nil {
-			lastErr = fmt.Errorf("cannot connect to tuskd: %w", err)
-			time.Sleep(200 * time.Millisecond)
-			continue
-		}
-
-		pingErr := cli.Ping()
-		if pingErr == nil {
-			cli.Close()
-			return mgr, nil
-		}
-
-		lastErr = fmt.Errorf("tuskd not responding: %w", pingErr)
-		cli.Close()
-		time.Sleep(200 * time.Millisecond)
+// ensureSocket returns the tuskd socket path if the daemon is reachable,
+// or an error with a helpful message if it is not.
+func ensureSocket() (string, error) {
+	sockPath := filepath.Join(tuskDir, "vm", "serial.sock")
+	if _, err := os.Stat(sockPath); err != nil {
+		return "", fmt.Errorf("tuskd not running (socket missing: %s). Run 'tusk start' first", sockPath)
 	}
-
-	if lastErr == nil {
-		lastErr = fmt.Errorf("VM not running. Run 'tusk start' first.")
+	cli := client.New(sockPath)
+	cli.SetTimeout(5 * time.Second)
+	if err := cli.Connect(); err != nil {
+		return "", fmt.Errorf("cannot connect to tuskd: %w", err)
 	}
-	return nil, lastErr
+	pingErr := cli.Ping()
+	cli.Close()
+	if pingErr != nil {
+		return "", fmt.Errorf("tuskd not responding: %w", pingErr)
+	}
+	return sockPath, nil
 }
+
+// ensureVM is kept for backward compatibility with compose.go callers that
+// only need the socket path. Returns a fake *struct{} so callers can keep
+// the two-value assignment; use the string form (ensureSocket) for new code.
+func ensureVM() (interface{ SerialSocket() string }, error) {
+	sock, err := ensureSocket()
+	if err != nil {
+		return nil, err
+	}
+	return &socketWrapper{sock}, nil
+}
+
+type socketWrapper struct{ path string }
+
+func (s *socketWrapper) SerialSocket() string { return s.path }
 
 func execLookPath(file string) (string, error) {
 	path, err := exec.LookPath(file)

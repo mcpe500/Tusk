@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -167,8 +168,10 @@ type Config struct {
 	Architecture string `json:"architecture"`
 	OS           string `json:"os"`
 	Config       struct {
-		Env []string `json:"Env"`
-		Cmd []string `json:"Cmd"`
+		Env        []string `json:"Env"`
+		Cmd        []string `json:"Cmd"`
+		Entrypoint []string `json:"Entrypoint"`
+		WorkingDir string   `json:"WorkingDir"`
 	} `json:"config"`
 	RootFS struct {
 		Type    string   `json:"type"`
@@ -222,7 +225,7 @@ func (s *Store) ExtractLayer(digest string, dest string) error {
 				return err
 			}
 			f.Close()
-			os.Chmod(target, 0644)
+			os.Chmod(target, header.FileInfo().Mode())
 		case tar.TypeSymlink:
 			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
 				return err
@@ -265,6 +268,13 @@ func (p *Puller) Pull(ctx context.Context, ref string) error {
 		tag = parts[1]
 	}
 
+	// Official Docker Hub images live under the "library/" namespace.
+	// e.g. "alpine" -> "library/alpine". Names that already contain a
+	// slash (user/repo) are left untouched.
+	if !strings.Contains(name, "/") {
+		name = "library/" + name
+	}
+
 	fmt.Printf("Pulling %s (tag: %s)\n", name, tag)
 
 	// Step 1: Get token from registry
@@ -273,7 +283,7 @@ func (p *Puller) Pull(ctx context.Context, ref string) error {
 		return fmt.Errorf("get token: %w", err)
 	}
 
-	// Step 2: Fetch manifest
+	// Step 2: Fetch manifest (resolves multi-arch manifest lists to this host's arch)
 	manifest, err := p.fetchManifest(ctx, registry, name, tag, token)
 	if err != nil {
 		return fmt.Errorf("fetch manifest: %w", err)
@@ -311,7 +321,8 @@ func (p *Puller) Pull(ctx context.Context, ref string) error {
 }
 
 func (p *Puller) getToken(ctx context.Context, registry, name string) (string, error) {
-	authURL := fmt.Sprintf("https://auth.docker.io/token?service=registry.docker.io&scope=repository:library/%s:pull", name)
+	// name already includes any namespace (e.g. "library/alpine").
+	authURL := fmt.Sprintf("https://auth.docker.io/token?service=registry.docker.io&scope=repository:%s:pull", name)
 	if registry != "registry-1.docker.io" {
 		authURL = fmt.Sprintf("https://%s/token?service=%s&scope=repository:%s:pull", registry, registry, name)
 	}
@@ -332,40 +343,123 @@ func (p *Puller) getToken(ctx context.Context, registry, name string) (string, e
 	}
 
 	var result struct {
-		Token string `json:"token"`
+		Token       string `json:"token"`
+		AccessToken string `json:"access_token"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return "", err
 	}
-	return result.Token, nil
+	if result.Token != "" {
+		return result.Token, nil
+	}
+	return result.AccessToken, nil
 }
 
-func (p *Puller) fetchManifest(ctx context.Context, registry, name, tag, token string) (*Manifest, error) {
-	url := fmt.Sprintf("https://%s/v2/%s/manifests/%s", registry, name, tag)
+// acceptManifestTypes lists every manifest media type we understand, in a
+// single Accept header (setting the header twice overwrites the first value).
+const acceptManifestTypes = "application/vnd.docker.distribution.manifest.v2+json, " +
+	"application/vnd.docker.distribution.manifest.list.v2+json, " +
+	"application/vnd.oci.image.manifest.v1+json, " +
+	"application/vnd.oci.image.index.v1+json"
 
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+// manifestList models a multi-arch manifest list / OCI image index.
+type manifestList struct {
+	MediaType string `json:"mediaType"`
+	Manifests []struct {
+		Digest    string `json:"digest"`
+		MediaType string `json:"mediaType"`
+		Platform  struct {
+			Architecture string `json:"architecture"`
+			OS           string `json:"os"`
+			Variant      string `json:"variant"`
+		} `json:"platform"`
+	} `json:"manifests"`
+}
+
+func (p *Puller) fetchManifest(ctx context.Context, registry, name, ref, token string) (*Manifest, error) {
+	raw, mediaType, err := p.fetchManifestRaw(ctx, registry, name, ref, token)
 	if err != nil {
 		return nil, err
 	}
+
+	// If we got a manifest list / index, select the digest matching this host.
+	if strings.Contains(mediaType, "manifest.list") || strings.Contains(mediaType, "image.index") {
+		var list manifestList
+		if err := json.Unmarshal(raw, &list); err != nil {
+			return nil, fmt.Errorf("parse manifest list: %w", err)
+		}
+		digest := selectPlatformDigest(list)
+		if digest == "" {
+			return nil, fmt.Errorf("no manifest for %s/%s in image %s", runtime.GOOS, runtime.GOARCH, name)
+		}
+		if p.verbose {
+			fmt.Printf("Selected %s/%s manifest: %s\n", runtime.GOOS, runtime.GOARCH, digest)
+		}
+		raw, _, err = p.fetchManifestRaw(ctx, registry, name, digest, token)
+		if err != nil {
+			return nil, fmt.Errorf("fetch platform manifest: %w", err)
+		}
+	}
+
+	var m Manifest
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil, err
+	}
+	if len(m.Layers) == 0 {
+		return nil, fmt.Errorf("manifest has no layers (unexpected media type %q)", mediaType)
+	}
+	return &m, nil
+}
+
+// selectPlatformDigest picks the manifest digest matching the host arch,
+// falling back to amd64 (runnable under QEMU) if the native arch is absent.
+// Container images always target OS "linux" — note runtime.GOOS is "android"
+// on Termux, so we match the image OS against "linux", not runtime.GOOS.
+func selectPlatformDigest(list manifestList) string {
+	const wantOS = "linux"
+	wantArch := runtime.GOARCH // "arm64" on aarch64 Termux, "amd64" on x86
+	var amd64Fallback string
+	for _, m := range list.Manifests {
+		if m.Platform.OS != "" && m.Platform.OS != wantOS {
+			continue
+		}
+		if m.Platform.Architecture == wantArch {
+			return m.Digest
+		}
+		if m.Platform.Architecture == "amd64" {
+			amd64Fallback = m.Digest
+		}
+	}
+	return amd64Fallback
+}
+
+func (p *Puller) fetchManifestRaw(ctx context.Context, registry, name, ref, token string) ([]byte, string, error) {
+	url := fmt.Sprintf("https://%s/v2/%s/manifests/%s", registry, name, ref)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, "", err
+	}
 	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Accept", "application/vnd.docker.distribution.manifest.v2+json")
-	req.Header.Set("Accept", "application/vnd.oci.image.manifest.v1+json")
+	req.Header.Set("Accept", acceptManifestTypes)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("manifest fetch failed: %d", resp.StatusCode)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return nil, "", fmt.Errorf("manifest fetch failed: %d %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 
-	var m Manifest
-	if err := json.NewDecoder(resp.Body).Decode(&m); err != nil {
-		return nil, err
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, "", err
 	}
-	return &m, nil
+	mediaType := resp.Header.Get("Content-Type")
+	return data, mediaType, nil
 }
 
 func (p *Puller) fetchBlob(ctx context.Context, registry, name, digest string, token string) ([]byte, error) {

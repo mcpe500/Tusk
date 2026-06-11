@@ -8,6 +8,7 @@ import (
 
 	"github.com/tusk/tusk/internal/client"
 	"github.com/tusk/tusk/internal/compose"
+	"github.com/tusk/tusk/pkg/types"
 )
 
 func runCompose() {
@@ -47,21 +48,32 @@ func runCompose() {
 		return
 	}
 
+	subArgs := args[i+1:]
 	switch args[i] {
 	case "up":
-		runComposeUp(composeFile)
+		detach := false
+		for _, a := range subArgs {
+			if a == "-d" || a == "--detach" {
+				detach = true
+			}
+		}
+		runComposeUp(composeFile, detach)
 	case "down":
 		runComposeDown(composeFile)
 	case "ps":
 		runComposePS(composeFile)
-	case "build":
-		fmt.Println("Compose build not implemented yet")
-	case "logs":
-		fmt.Println("Compose logs not implemented yet")
-	case "rm":
-		fmt.Println("Compose rm not implemented yet")
 	case "stop":
-		fmt.Println("Compose stop not implemented yet")
+		runComposeStop(composeFile)
+	case "logs":
+		svc := ""
+		if len(subArgs) > 0 {
+			svc = subArgs[0]
+		}
+		runComposeLogs(composeFile, svc)
+	case "rm":
+		runComposeRm(composeFile)
+	case "build":
+		fmt.Println("compose build: building images not supported; use pre-built images")
 	default:
 		fmt.Printf("Unknown compose command: %s\n", args[i])
 	}
@@ -87,7 +99,7 @@ func printComposeUsage() {
 	fmt.Println("  tusk compose -f docker-compose.yml up")
 }
 
-func runComposeUp(composeFile string) {
+func runComposeUp(composeFile string, detach bool) {
 	if composeFile == "" {
 		composeFile = "docker-compose.yml"
 	}
@@ -118,8 +130,11 @@ func runComposeUp(composeFile string) {
 		os.Exit(1)
 	}
 
-	fmt.Println("")
-	fmt.Println("Services started!")
+	if detach {
+		fmt.Println("Services started (detached).")
+	} else {
+		fmt.Println("Services started.")
+	}
 	fmt.Println("Use 'tusk ps' to see running containers")
 }
 
@@ -140,51 +155,33 @@ func runComposeDown(composeFile string) {
 		os.Exit(1)
 	}
 
-	workDir, _ := filepath.Abs(filepath.Dir(composeFile))
-	orch := compose.NewOrchestrator(spec, workDir)
 	if _, err := ensureVM(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 
+	workDir, _ := filepath.Abs(filepath.Dir(composeFile))
+	orch := compose.NewOrchestrator(spec, workDir)
 	fmt.Println("Stopping services...")
 	if err := orch.Down(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Also remove containers via RPC
-	mgr, _ := ensureVM()
-	if mgr != nil {
-		cli := client.New(mgr.SerialSocket())
-		if err := cli.Connect(); err == nil {
-			containers, err := cli.ContainerList(false)
-			if err == nil {
-				for _, c := range containers {
-					cli.ContainerRemove(c.ID, true)
-					id := c.ID
-					if len(id) > 12 {
-						id = id[:12]
-					}
-					fmt.Printf("  Removed: %s (%s)\n", c.Name, id)
-				}
-			}
-			cli.Close()
-		}
-	}
-
-	fmt.Println("")
-	fmt.Println("Services stopped and removed!")
+	fmt.Println("Services stopped and removed.")
 }
 
 func runComposePS(composeFile string) {
-	if _, err := ensureVM(); err != nil {
+	if composeFile == "" {
+		composeFile = "docker-compose.yml"
+	}
+	parser := compose.NewParser()
+	spec, _ := parser.Parse(composeFile)
+
+	mgr, err := ensureVM()
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
-	}
-	mgr, _ := ensureVM()
-	if mgr == nil {
-		return
 	}
 	cli := client.New(mgr.SerialSocket())
 	if err := cli.Connect(); err != nil {
@@ -192,21 +189,172 @@ func runComposePS(composeFile string) {
 		os.Exit(1)
 	}
 	defer cli.Close()
-	containers, err := cli.ContainerList(false)
+	containers, err := cli.ContainerList(true)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
-	if len(containers) == 0 {
-		fmt.Println("No containers found")
-		return
-	}
+
+	projectName := filepath.Base(filepath.Dir(absPath(composeFile)))
 	fmt.Printf("%-12s %-20s %-20s %-10s\n", "CONTAINER ID", "NAME", "IMAGE", "STATUS")
+	printed := 0
 	for _, c := range containers {
+		if spec != nil && !isProjectContainer(c.Name, projectName, spec) {
+			continue
+		}
 		id := c.ID
 		if len(id) > 12 {
 			id = id[:12]
 		}
 		fmt.Printf("%-12s %-20s %-20s %-10s\n", id, c.Name, c.Image, c.Status)
+		printed++
 	}
+	if printed == 0 {
+		fmt.Println("No containers found")
+	}
+}
+
+func runComposeStop(composeFile string) {
+	if composeFile == "" {
+		composeFile = "docker-compose.yml"
+	}
+	parser := compose.NewParser()
+	spec, err := parser.Parse(composeFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	mgr, err := ensureVM()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	cli := client.New(mgr.SerialSocket())
+	if err := cli.Connect(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	defer cli.Close()
+	projectName := filepath.Base(filepath.Dir(absPath(composeFile)))
+	containers, err := cli.ContainerList(true)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	for _, c := range containers {
+		if !isProjectContainer(c.Name, projectName, spec) {
+			continue
+		}
+		if err := cli.ContainerStop(c.ID); err != nil {
+			fmt.Fprintf(os.Stderr, "  Warning: stop %s: %v\n", c.Name, err)
+		} else {
+			fmt.Printf("  Stopped: %s\n", c.Name)
+		}
+	}
+}
+
+func runComposeLogs(composeFile, service string) {
+	if composeFile == "" {
+		composeFile = "docker-compose.yml"
+	}
+	parser := compose.NewParser()
+	spec, err := parser.Parse(composeFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	mgr, err := ensureVM()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	cli := client.New(mgr.SerialSocket())
+	if err := cli.Connect(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	defer cli.Close()
+	projectName := filepath.Base(filepath.Dir(absPath(composeFile)))
+	containers, err := cli.ContainerList(true)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	for _, c := range containers {
+		if !isProjectContainer(c.Name, projectName, spec) {
+			continue
+		}
+		if service != "" && c.Name != service && c.Name != projectName+"-"+service {
+			continue
+		}
+		logs, err := cli.ContainerLogs(c.ID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "  Warning: logs %s: %v\n", c.Name, err)
+			continue
+		}
+		fmt.Printf("=== %s ===\n%s\n", c.Name, logs)
+	}
+}
+
+func runComposeRm(composeFile string) {
+	if composeFile == "" {
+		composeFile = "docker-compose.yml"
+	}
+	parser := compose.NewParser()
+	spec, err := parser.Parse(composeFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	mgr, err := ensureVM()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	cli := client.New(mgr.SerialSocket())
+	if err := cli.Connect(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	defer cli.Close()
+	projectName := filepath.Base(filepath.Dir(absPath(composeFile)))
+	containers, err := cli.ContainerList(true)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	for _, c := range containers {
+		if !isProjectContainer(c.Name, projectName, spec) {
+			continue
+		}
+		if err := cli.ContainerRemove(c.ID, true); err != nil {
+			fmt.Fprintf(os.Stderr, "  Warning: remove %s: %v\n", c.Name, err)
+		} else {
+			fmt.Printf("  Removed: %s\n", c.Name)
+		}
+	}
+}
+
+// isProjectContainer returns true if container name belongs to this compose project.
+// Matches "<project>-<service>" or explicit container_name values.
+func isProjectContainer(name, projectName string, spec *types.ComposeSpec) bool {
+	if strings.HasPrefix(name, projectName+"-") {
+		return true
+	}
+	if spec != nil {
+		for _, svc := range spec.Services {
+			if svc.ContainerName == name {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func absPath(p string) string {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return p
+	}
+	return abs
 }

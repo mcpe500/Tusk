@@ -136,7 +136,7 @@ func ExtractLayer(layerData []byte, destDir string) error {
 				return err
 			}
 			f.Close()
-			os.Chmod(target, 0644)
+			os.Chmod(target, header.FileInfo().Mode())
 		case tar.TypeSymlink:
 			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
 				return err

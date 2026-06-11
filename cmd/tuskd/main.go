@@ -9,22 +9,13 @@ func main() {
 	devicePath := deviceArg(os.Args)
 	socketPath := socketArg(os.Args)
 
-	// Explicit simulation mode via flag or env
-	if os.Getenv("TUSK_SIMULATION") == "1" || hasFlag(os.Args, "--simulation") {
-		if socketPath != "" {
-			runSimulationSocket(socketPath)
-		} else {
-			runSimulationMode()
-		}
-		return
-	}
-
-	// Running outside VM — auto-detect
+	// Native host mode (Termux/Android, no VM): run the real proot-backed
+	// daemon. There is no simulation mode — containers really execute.
 	if _, err := os.Stat("/tusk"); os.IsNotExist(err) && devicePath == "" {
 		if socketPath != "" {
-			runSimulationSocket(socketPath)
+			runHostSocket(socketPath)
 		} else {
-			runSimulationMode()
+			runHostMode()
 		}
 		return
 	}

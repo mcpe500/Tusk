@@ -27,6 +27,7 @@ func runDaemon() {
 
 	fmt.Printf("Tuskd listening on %s\n", socketPath)
 	store := NewContainerStore("/tusk/containers")
+	rt := NewRuntime("/tusk")
 
 	for {
 		conn, err := ln.Accept()
@@ -35,7 +36,7 @@ func runDaemon() {
 		}
 		go func(c net.Conn) {
 			defer c.Close()
-			handleStream(c, c, store)
+			handleStream(c, c, store, rt)
 		}(conn)
 	}
 }
@@ -43,6 +44,7 @@ func runDaemon() {
 func runDeviceDaemon(path string) {
 	fmt.Printf("Tuskd listening on device %s\n", path)
 	store := NewContainerStore("/tusk/containers")
+	rt := NewRuntime("/tusk")
 	paths := virtioDevicePaths(path)
 
 	for {
@@ -54,7 +56,7 @@ func runDeviceDaemon(path string) {
 		}
 
 		fmt.Printf("Connected to device %s\n", activePath)
-		handleStream(f, f, store)
+		handleStream(f, f, store, rt)
 		f.Close()
 		fmt.Printf("Device %s closed, reconnecting...\n", activePath)
 		time.Sleep(1 * time.Second)
@@ -81,7 +83,7 @@ func openFirstDevice(paths []string) (*os.File, string, error) {
 	return nil, "", lastErr
 }
 
-func handleStream(r io.Reader, w io.Writer, store *ContainerStore) {
+func handleStream(r io.Reader, w io.Writer, store *ContainerStore, rt *Runtime) {
 	reader := bufio.NewReader(r)
 	enc := json.NewEncoder(w)
 
@@ -111,6 +113,6 @@ func handleStream(r io.Reader, w io.Writer, store *ContainerStore) {
 			continue
 		}
 
-		enc.Encode(handleRPC(store, method, req))
+		enc.Encode(handleRPC(store, rt, method, req))
 	}
 }
