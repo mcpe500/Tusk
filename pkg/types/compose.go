@@ -77,6 +77,25 @@ type BuildSpec struct {
 	CacheFrom  []string          `json:"cache_from,omitempty"`
 }
 
+// UnmarshalYAML allows build: . (string shorthand) as well as the full object form.
+func (b *BuildSpec) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind == yaml.ScalarNode {
+		var s string
+		if err := value.Decode(&s); err != nil {
+			return err
+		}
+		b.Context = s
+		return nil
+	}
+	type rawSpec BuildSpec
+	var raw rawSpec
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+	*b = BuildSpec(raw)
+	return nil
+}
+
 type ServiceDep struct {
 	Condition string `json:"condition,omitempty"`
 }
