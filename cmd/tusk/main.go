@@ -63,6 +63,8 @@ func main() {
 		runVolume()
 	case "compose":
 		runCompose()
+	case "build":
+		runBuild()
 	case "rpc":
 		runRPC()
 	default:

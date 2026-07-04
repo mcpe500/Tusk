@@ -41,6 +41,8 @@ func handleRPC(store *ContainerStore, rt *Runtime, method string, req map[string
 		handleImagePull(rt, req, resp)
 	case "ImageList":
 		handleImageList(rt, resp)
+	case "ImageBuild":
+		handleImageBuild(rt, req, resp)
 	case "NetworkCreate":
 		handleNetworkCreate(req, resp)
 	case "NetworkList":
@@ -265,6 +267,41 @@ func handleImagePull(rt *Runtime, req, resp map[string]interface{}) {
 
 func handleImageList(rt *Runtime, resp map[string]interface{}) {
 	resp["result"] = map[string]interface{}{"images": rt.ImageList()}
+}
+
+func handleImageBuild(rt *Runtime, req, resp map[string]interface{}) {
+	params, ok := reqParams(req)
+	if !ok {
+		resp["error"] = errorObject(-32602, "invalid params")
+		return
+	}
+	contextDir := strings.TrimSpace(getStringOrDefault(params["contextDir"]))
+	if contextDir == "" {
+		resp["error"] = errorObject(-32602, "invalid params: contextDir is required")
+		return
+	}
+	tag := strings.TrimSpace(getStringOrDefault(params["tag"]))
+	if tag == "" {
+		resp["error"] = errorObject(-32602, "invalid params: tag is required")
+		return
+	}
+	dockerfile := strings.TrimSpace(getStringOrDefault(params["dockerfile"]))
+	if dockerfile == "" {
+		dockerfile = "Dockerfile"
+	}
+
+	buildArgs := make(map[string]string)
+	if raw, ok := params["buildArgs"].(map[string]interface{}); ok {
+		for k, v := range raw {
+			buildArgs[k] = fmt.Sprintf("%v", v)
+		}
+	}
+
+	if err := rt.Build(contextDir, dockerfile, tag, buildArgs); err != nil {
+		resp["error"] = errorObject(-32603, "build: "+err.Error())
+		return
+	}
+	resp["result"] = map[string]string{"status": "built", "tag": tag}
 }
 
 func handleNetworkCreate(req, resp map[string]interface{}) {

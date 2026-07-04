@@ -73,7 +73,7 @@ func runCompose() {
 	case "rm":
 		runComposeRm(composeFile)
 	case "build":
-		fmt.Println("compose build: building images not supported; use pre-built images")
+		runComposeBuild(composeFile)
 	default:
 		fmt.Printf("Unknown compose command: %s\n", args[i])
 	}
@@ -136,6 +136,33 @@ func runComposeUp(composeFile string, detach bool) {
 		fmt.Println("Services started.")
 	}
 	fmt.Println("Use 'tusk ps' to see running containers")
+}
+
+func runComposeBuild(composeFile string) {
+	if composeFile == "" {
+		composeFile = "docker-compose.yml"
+	}
+	if _, err := os.Stat(composeFile); os.IsNotExist(err) {
+		fmt.Fprintf(os.Stderr, "Error: compose file not found: %s\n", composeFile)
+		os.Exit(1)
+	}
+
+	parser := compose.NewParser()
+	spec, err := parser.Parse(composeFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: failed to parse compose file: %v\n", err)
+		os.Exit(1)
+	}
+
+	workDir, _ := filepath.Abs(filepath.Dir(composeFile))
+	orch := compose.NewOrchestrator(spec, workDir)
+
+	fmt.Println("Building service images...")
+	if err := orch.BuildImages(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("Done.")
 }
 
 func runComposeDown(composeFile string) {

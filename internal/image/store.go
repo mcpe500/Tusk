@@ -42,6 +42,11 @@ func (s *Store) Init() error {
 }
 
 func (s *Store) blobPath(digest string) string {
+	return s.BlobPath(digest)
+}
+
+// BlobPath returns the filesystem path for a blob digest.
+func (s *Store) BlobPath(digest string) string {
 	parts := strings.SplitN(digest, ":", 2)
 	if len(parts) != 2 {
 		return ""
@@ -100,7 +105,51 @@ func (s *Store) SaveManifest(ref string, manifest Manifest) error {
 		return err
 	}
 
-	return os.WriteFile(indexPath, []byte(digest), 0644)
+	if err := os.WriteFile(indexPath, []byte(digest), 0644); err != nil {
+		return err
+	}
+
+	// Also update refs.json registry (digest → []ref) for listing.
+	return s.updateRefsRegistry(digest, ref)
+}
+
+// updateRefsRegistry maintains a JSON file mapping manifest digest → ref names.
+func (s *Store) updateRefsRegistry(digest, ref string) error {
+	refsPath := filepath.Join(s.baseDir, "refs.json")
+	refs := make(map[string][]string)
+	if data, err := os.ReadFile(refsPath); err == nil {
+		json.Unmarshal(data, &refs)
+	}
+
+	for _, existing := range refs[digest] {
+		if existing == ref {
+			return nil // already registered
+		}
+	}
+	refs[digest] = append(refs[digest], ref)
+
+	data, err := json.MarshalIndent(refs, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(refsPath, data, 0644)
+}
+
+// ListRefs returns a map of manifest digest → ref names.
+func (s *Store) ListRefs() (map[string][]string, error) {
+	refsPath := filepath.Join(s.baseDir, "refs.json")
+	data, err := os.ReadFile(refsPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return make(map[string][]string), nil
+		}
+		return nil, err
+	}
+	var refs map[string][]string
+	if err := json.Unmarshal(data, &refs); err != nil {
+		return nil, err
+	}
+	return refs, nil
 }
 
 func (s *Store) GetManifest(digest string) (*Manifest, error) {

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/tusk/tusk/internal/build"
 	"github.com/tusk/tusk/internal/container"
 	"github.com/tusk/tusk/internal/image"
 )
@@ -56,6 +57,26 @@ func (r *Runtime) Pull(ref string) error {
 	}
 	if digest, err := r.store.ResolveManifestRef(ref); err == nil {
 		r.recordRepo(ref, digest)
+	}
+	return nil
+}
+
+// Build creates an image from a Dockerfile and stores it locally.
+func (r *Runtime) Build(contextDir, dockerfile, tag string, buildArgs map[string]string) error {
+	engine := build.NewEngine(r.store, r.tuskDir)
+	manifest, err := engine.Build(context.Background(), build.BuildOptions{
+		ContextDir: contextDir,
+		Dockerfile: dockerfile,
+		ImageTag:   tag,
+		BuildArgs:  buildArgs,
+	})
+	if err != nil {
+		return err
+	}
+	// Record in repositories.json for ImageList.
+	_ = manifest
+	if digest, err := r.store.ResolveManifestRef(tag); err == nil {
+		r.recordRepo(tag, digest)
 	}
 	return nil
 }

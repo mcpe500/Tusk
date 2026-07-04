@@ -1,13 +1,16 @@
 package compose
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
+	"github.com/tusk/tusk/internal/build"
 	"github.com/tusk/tusk/internal/client"
+	"github.com/tusk/tusk/internal/image"
 	"github.com/tusk/tusk/pkg/protocol"
 	"github.com/tusk/tusk/pkg/types"
 	"gopkg.in/yaml.v3"
@@ -132,6 +135,58 @@ func (o *Orchestrator) createNetwork(name string, net types.Network) error {
 	return nil
 }
 
+// BuildImages builds images for all services that have build directives.
+func (o *Orchestrator) BuildImages() error {
+	order, err := o.resolveServiceOrder()
+	if err != nil {
+		return err
+	}
+	for _, name := range order {
+		svc := o.spec.Services[name]
+		if svc.Build == nil {
+			continue
+		}
+		tag := "tusk-local/" + name + ":latest"
+		fmt.Printf("Building image for %s...\n", name)
+		if err := o.buildImage(svc.Build, name, tag); err != nil {
+			return fmt.Errorf("build image for %s: %w", name, err)
+		}
+		svc.Image = tag
+	}
+	return nil
+}
+
+// buildImage builds a single service's Dockerfile and stores the image locally.
+func (o *Orchestrator) buildImage(buildSpec *types.BuildSpec, svcName, tag string) error {
+	imageStore := image.New(filepath.Join(os.Getenv("HOME"), ".tusk", "images"))
+	imageStore.Init()
+
+	engine := build.NewEngine(imageStore, filepath.Join(os.Getenv("HOME"), ".tusk"))
+	engine.SetVerbose(true)
+
+	dockerfile := buildSpec.Dockerfile
+	if dockerfile == "" {
+		dockerfile = "Dockerfile"
+	}
+
+	contextPath := buildSpec.Context
+	if contextPath == "" {
+		contextPath = "."
+	}
+	if !filepath.IsAbs(contextPath) {
+		contextPath = filepath.Join(o.workDir, contextPath)
+	}
+
+	_, err := engine.Build(context.Background(), build.BuildOptions{
+		ContextDir: contextPath,
+		Dockerfile: dockerfile,
+		ImageTag:   tag,
+		BuildArgs:  buildSpec.Args,
+		Labels:     buildSpec.Labels,
+	})
+	return err
+}
+
 func (o *Orchestrator) removeNetwork(name string) {
 	fmt.Printf("Removing network: %s\n", name)
 }
@@ -159,11 +214,16 @@ func (o *Orchestrator) startServices() error {
 
 		if svc.Image == "" {
 			if svc.Build != nil {
-				fmt.Fprintf(os.Stderr, "Warning: service %s: build not supported; specify an image instead\n", name)
+				tag := "tusk-local/" + name + ":latest"
+				fmt.Printf("Building image for %s...\n", name)
+				if err := o.buildImage(svc.Build, name, tag); err != nil {
+					return fmt.Errorf("build image for %s: %w", name, err)
+				}
+				svc.Image = tag
+			} else {
+				fmt.Fprintf(os.Stderr, "Skipping service %s: no image configured\n", name)
 				continue
 			}
-			fmt.Fprintf(os.Stderr, "Skipping service %s: no image configured\n", name)
-			continue
 		}
 
 		fmt.Printf("Starting service: %s (image: %s)\n", name, svc.Image)

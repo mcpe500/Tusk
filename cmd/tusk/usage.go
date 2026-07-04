@@ -18,6 +18,7 @@ Usage:
 
   tusk pull <image>      Pull image from registry
   tusk images            List local images
+  tusk build [opts] <ctx>  Build image from Dockerfile
 
   tusk run [opts] <image>   Run a container
   tusk ps                List running containers
@@ -29,7 +30,8 @@ Usage:
   tusk network ls        List networks
   tusk volume ls         List volumes
 
-  tusk compose up        Start compose services
+  tusk compose up        Start compose services (auto-builds if needed)
+  tusk compose build     Build compose service images
   tusk compose down      Stop compose services
   tusk compose ps        List compose services
 
