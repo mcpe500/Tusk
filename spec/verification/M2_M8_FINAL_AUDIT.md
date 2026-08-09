@@ -43,6 +43,15 @@ Gemini backend, so no semantic success is claimed.
 
 ## External Blockers
 
+An additional host-side QEMU lab attempt was made after this report's code
+hardening:
+
+- A Debian 12 generic cloud image was booted with `qemu-system-x86_64` using
+  TCG, a separate data qcow2, and a cloud-init seed.
+- The guest reached multi-user/login state, proving boot-level QEMU execution.
+- SSH host-key/service readiness failed, so the Tusk QEMU adapter could not
+  establish its pinned SSH contract. This is not AT-032 evidence.
+
 The host does not provide the evidence needed to close the remaining gates:
 
 - No initialized Android/Termux reference device or device performance record.
