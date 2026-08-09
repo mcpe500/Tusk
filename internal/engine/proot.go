@@ -33,6 +33,11 @@ type ProotConfig struct {
 	ProbeImage        string
 }
 
+type BackendResources struct {
+	CPUs      int
+	MemoryMiB int
+}
+
 type ProotAdapter struct {
 	mu            sync.Mutex
 	lifecycleMu   sync.Mutex
@@ -85,9 +90,16 @@ func NewLocalCandidateFactory(dataRoot string, device platform.Device) Candidate
 }
 
 func NewLocalCandidateFactoryWithProbe(dataRoot string, device platform.Device, probeImage string) CandidateTargetFactory {
+	return NewLocalCandidateFactoryWithProbeAndResources(dataRoot, device, probeImage, nil)
+}
+
+func NewLocalCandidateFactoryWithProbeAndResources(dataRoot string, device platform.Device, probeImage string, resources map[string]BackendResources) CandidateTargetFactory {
 	return func(ctx context.Context, candidate Candidate) (QualificationTarget, error) {
+		if isQEMUCandidate(candidate.ID) {
+			return newLocalQEMUTarget(ctx, dataRoot, device, candidate, probeImage, resources[candidate.ID])
+		}
 		if candidate.ID != "proot-native" && candidate.ID != "proot-qemu-user-x86_64" {
-			return nil, fmt.Errorf("candidate %s is not a proot candidate", candidate.ID)
+			return nil, fmt.Errorf("candidate %s is not a packaged adapter", candidate.ID)
 		}
 		engineRoot := filepath.Join(dataRoot, "engines", candidate.ID)
 		config := ProotConfig{
@@ -118,6 +130,55 @@ func NewLocalCandidateFactoryWithProbe(dataRoot string, device platform.Device, 
 		}
 		return AdapterTarget{Adapter: adapter}, nil
 	}
+}
+
+func newLocalQEMUTarget(ctx context.Context, dataRoot string, device platform.Device, candidate Candidate, probeImage string, resources BackendResources) (QualificationTarget, error) {
+	if resources.CPUs == 0 {
+		resources.CPUs = 2
+	}
+	if resources.MemoryMiB == 0 {
+		resources.MemoryMiB = 1024
+	}
+	engineRoot := filepath.Join(dataRoot, "engines", candidate.ID)
+	command := candidate.RequiredCommands[0]
+	config := QEMUConfig{
+		CandidateID:   candidate.ID,
+		QEMUPath:      device.Commands[command],
+		SystemImage:   filepath.Join(engineRoot, "system.qcow2"),
+		DataImage:     filepath.Join(engineRoot, "data.qcow2"),
+		RuntimeDir:    filepath.Join(dataRoot, "run", candidate.ID),
+		SharedRoot:    filepath.Join(dataRoot, "workspaces"),
+		SSHPrivateKey: filepath.Join(dataRoot, "keys", "guest_ed25519"),
+		KnownHosts:    filepath.Join(dataRoot, "keys", "known_hosts"),
+		SSHPort:       0,
+		CPUs:          resources.CPUs,
+		MemoryMiB:     resources.MemoryMiB,
+		ProbeImage:    probeImage,
+	}
+	adapter, err := NewQEMUAdapter(config)
+	if err != nil {
+		return nil, err
+	}
+	preflight, err := adapter.Preflight(ctx, device)
+	if err != nil {
+		return nil, err
+	}
+	if !preflight.Applicable || !preflight.Available {
+		return nil, fmt.Errorf("QEMU preflight rejected %s: %s", candidate.ID, strings.Join(preflight.Reasons, "; "))
+	}
+	if err := adapter.Initialize(ctx); err != nil {
+		return nil, err
+	}
+	return AdapterTarget{Adapter: adapter}, nil
+}
+
+func qemuSSHPort(candidateID string) int {
+	for index, candidate := range Catalog() {
+		if candidate.ID == candidateID {
+			return 22000 + index
+		}
+	}
+	return 22999
 }
 
 func (adapter *ProotAdapter) Candidate() Candidate {

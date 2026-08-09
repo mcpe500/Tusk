@@ -149,6 +149,15 @@ func runEngineTune(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "discover device: %v\n", err)
 		return exSoftware
 	}
+	cfg, err := config.Load(filepath.Join(dataDir(), "config.json"))
+	if err != nil {
+		fmt.Fprintf(stderr, "load config: %v\n", err)
+		return exSoftware
+	}
+	resources := make(map[string]engine.BackendResources, len(cfg.Engines))
+	for id, value := range cfg.Engines {
+		resources[id] = engine.BackendResources{CPUs: value.CPUs, MemoryMiB: value.MemoryMiB}
+	}
 	modeValue := engine.TuneMode(*mode)
 	if modeValue != engine.TuneQuick && modeValue != engine.TuneThorough {
 		fmt.Fprintf(stderr, "unsupported tune mode %q\n", *mode)
@@ -168,7 +177,7 @@ func runEngineTune(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "probe public key must be 32-byte Ed25519 key encoded as hex")
 		return exUsage
 	}
-	report, err := engine.RunTune(context.Background(), device, engine.DiscoverCandidates(device), engine.NewLocalCandidateFactoryWithProbe(dataDir(), device, *probeImage), engine.TuneOptions{
+	report, err := engine.RunTune(context.Background(), device, engine.DiscoverCandidates(device), engine.NewLocalCandidateFactoryWithProbeAndResources(dataDir(), device, *probeImage, resources), engine.TuneOptions{
 		Mode:           modeValue,
 		Policy:         policy,
 		ProbeImage:     *probeImage,
