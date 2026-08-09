@@ -168,7 +168,7 @@ func runEngineTune(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "probe public key must be 32-byte Ed25519 key encoded as hex")
 		return exUsage
 	}
-	report, err := engine.RunTune(context.Background(), device, engine.DiscoverCandidates(device), nil, engine.TuneOptions{
+	report, err := engine.RunTune(context.Background(), device, engine.DiscoverCandidates(device), engine.NewLocalCandidateFactoryWithProbe(dataDir(), device, *probeImage), engine.TuneOptions{
 		Mode:           modeValue,
 		Policy:         policy,
 		ProbeImage:     *probeImage,

@@ -2,7 +2,10 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"io"
+	"strings"
+	"time"
 
 	"github.com/mcpe500/Tusk/internal/platform"
 )
@@ -43,7 +46,46 @@ type Command struct {
 }
 
 type CommandResult struct {
-	ExitCode int
+	ExitCode      int
+	Stdout        string
+	Stderr        string
+	Duration      time.Duration
+	PeakMemoryMiB float64
+}
+
+// AdapterTarget exposes an Adapter through the qualification harness while
+// preserving streams and measurements. It is the only bridge used by tuning.
+type AdapterTarget struct {
+	Adapter Adapter
+}
+
+func (target AdapterTarget) Execute(ctx context.Context, request ExecutionRequest) (ExecutionResult, error) {
+	if target.Adapter == nil {
+		return ExecutionResult{}, errors.New("adapter target is not configured")
+	}
+	var stdout, stderr strings.Builder
+	result, err := target.Adapter.Execute(ctx, Command{Args: request.Args, Stdin: request.Stdin, Stdout: &stdout, Stderr: &stderr, WorkingDir: request.WorkingDir})
+	if err != nil {
+		return ExecutionResult{}, err
+	}
+	return ExecutionResult{ExitCode: result.ExitCode, Stdout: stdout.String(), Stderr: stderr.String(), Duration: result.Duration}, nil
+}
+
+func (target AdapterTarget) Restart(ctx context.Context) error {
+	if target.Adapter == nil {
+		return errors.New("adapter target is not configured")
+	}
+	if err := target.Adapter.Stop(ctx, false); err != nil {
+		return err
+	}
+	return target.Adapter.Start(ctx)
+}
+
+func (target AdapterTarget) Measure(ctx context.Context) (Metrics, error) {
+	if target.Adapter == nil {
+		return Metrics{}, errors.New("adapter target is not configured")
+	}
+	return target.Adapter.Measure(ctx)
 }
 
 // Adapter is the evidence and lifecycle boundary every backend must implement.

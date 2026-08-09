@@ -15,7 +15,7 @@ The canonical product and system contract is:
 | M0 Canonical specification and reset | Complete |
 | M1 Host foundation | Complete |
 | M2 Probe and qualification framework | Complete |
-| M3 Proot candidates | Not started |
+| M3 Proot candidates | In progress (AT-019 device gate pending) |
 
 M1 includes:
 
