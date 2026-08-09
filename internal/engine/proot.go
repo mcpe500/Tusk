@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -489,6 +490,16 @@ func maxRSS(samples []CommandResult) float64 {
 func (adapter *ProotAdapter) Cleanup(ctx context.Context) error {
 	return adapter.Stop(ctx, true)
 }
+
+func (adapter *ProotAdapter) ForwardTCP(ctx context.Context, port PublishedPort) error {
+	connection, err := (&net.Dialer{}).DialContext(ctx, "tcp", net.JoinHostPort(port.HostIP, strconv.Itoa(port.HostPort)))
+	if err != nil {
+		return fmt.Errorf("verify native proot TCP publish %s:%d: %w", port.HostIP, port.HostPort, err)
+	}
+	return connection.Close()
+}
+
+func (adapter *ProotAdapter) RemoveTCP(context.Context, PublishedPort) error { return nil }
 
 // RecreateAPI repairs only the local bridge and preserves the backend data.
 func (adapter *ProotAdapter) RecreateAPI(ctx context.Context) error {

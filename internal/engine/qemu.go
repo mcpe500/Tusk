@@ -165,7 +165,7 @@ func (adapter *QEMUAdapter) Initialize(_ context.Context) error {
 	if existing.PID > 0 && processStartTicks(existing.PID) == existing.StartTicks {
 		return errors.New("cannot initialize QEMU while its recorded process is still running")
 	}
-	if existing.SSHPort > 0 && portAvailable(existing.SSHPort) {
+	if existing.SSHPort > 0 && qemuPortAvailable(existing.SSHPort) {
 		adapter.config.SSHPort = existing.SSHPort
 	}
 	if adapter.config.SSHPort == 0 {
@@ -175,7 +175,7 @@ func (adapter *QEMUAdapter) Initialize(_ context.Context) error {
 		}
 		adapter.config.SSHPort = port
 	}
-	if !portAvailable(adapter.config.SSHPort) {
+	if !qemuPortAvailable(adapter.config.SSHPort) {
 		return fmt.Errorf("QEMU SSH port %d is already in use", adapter.config.SSHPort)
 	}
 	if err := verifyPrivateKey(adapter.config.SSHPrivateKey); err != nil {
@@ -446,6 +446,19 @@ func (adapter *QEMUAdapter) Measure(ctx context.Context) (Metrics, error) {
 
 func (adapter *QEMUAdapter) Cleanup(ctx context.Context) error {
 	return adapter.Stop(ctx, true)
+}
+
+func (adapter *QEMUAdapter) ForwardTCP(ctx context.Context, port PublishedPort) error {
+	if port.HostIP != "127.0.0.1" && port.HostIP != "::1" {
+		return errors.New("QEMU host forwarding only supports loopback addresses")
+	}
+	command := fmt.Sprintf("hostfwd_add net0 tcp:%s:%d-:%d", port.HostIP, port.HostPort, port.ContainerPort)
+	return adapter.qmpCommand(ctx, map[string]any{"execute": "human-monitor-command", "arguments": map[string]string{"command-line": command}})
+}
+
+func (adapter *QEMUAdapter) RemoveTCP(ctx context.Context, port PublishedPort) error {
+	command := fmt.Sprintf("hostfwd_remove net0 tcp:%s:%d-:%d", port.HostIP, port.HostPort, port.ContainerPort)
+	return adapter.qmpCommand(ctx, map[string]any{"execute": "human-monitor-command", "arguments": map[string]string{"command-line": command}})
 }
 
 func (adapter *QEMUAdapter) qemuArgs() []string {
@@ -722,7 +735,7 @@ func reserveLoopbackPort() (int, error) {
 	return listener.Addr().(*net.TCPAddr).Port, nil
 }
 
-func portAvailable(port int) bool {
+func qemuPortAvailable(port int) bool {
 	listener, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(port))
 	if err != nil {
 		return false

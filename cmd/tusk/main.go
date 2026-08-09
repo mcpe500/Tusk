@@ -58,6 +58,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runStatus(args[1:], stdout, stderr)
 	case "env":
 		return runEnv(args[1:], stdout, stderr)
+	case "share":
+		return runShare(args[1:], stdout, stderr)
 	case "help", "-h", "--help":
 		printUsage(stdout)
 		return 0
@@ -122,6 +124,17 @@ func runPodman(args []string, composeAlias bool, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return exUsage
 	}
+	sharesPath := filepath.Join(dataDir(), "shares.json")
+	shares, err := engine.LoadShares(sharesPath, filepath.Join(dataDir(), "workspaces"))
+	if err != nil {
+		fmt.Fprintf(stderr, "load shares: %v\n", err)
+		return exSoftware
+	}
+	translatedArgs, guestWorkingDirectory, err := engine.TranslatePodmanArgs(args, workingDirectory, shares)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return exUsage
+	}
 	resources := make(map[string]engine.BackendResources, len(cfg.Engines))
 	for id, value := range cfg.Engines {
 		resources[id] = engine.BackendResources{CPUs: value.CPUs, MemoryMiB: value.MemoryMiB}
@@ -137,14 +150,18 @@ func runPodman(args []string, composeAlias bool, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "selected backend does not expose a Podman adapter")
 		return exSoftware
 	}
+	var reconciler *engine.PortReconciler
+	if forwarder, ok := adapterTarget.Adapter.(engine.PortForwarder); ok {
+		reconciler = &engine.PortReconciler{Path: filepath.Join(dataDir(), "engines", selected, "ports.json"), BackendID: selected, Forwarder: forwarder}
+	}
 	tty := terminalFile(os.Stdin) && terminalWriter(stdout)
-	versionOutput := len(args) > 0 && args[0] == "version" && !containsOutputFormat(args[1:])
+	versionOutput := len(translatedArgs) > 0 && translatedArgs[0] == "version" && !containsOutputFormat(translatedArgs[1:])
 	output := stdout
 	var captured bytes.Buffer
 	if versionOutput {
 		output = &captured
 	}
-	result, err := engine.ForwardPodman(context.Background(), adapterTarget.Adapter, args, os.Stdin, output, stderr, tty, engine.ForwardOptions{AutoStart: os.Getenv("TUSK_NO_AUTO_START") != "1"})
+	result, err := engine.ForwardPodman(context.Background(), adapterTarget.Adapter, translatedArgs, os.Stdin, output, stderr, tty, engine.ForwardOptions{AutoStart: os.Getenv("TUSK_NO_AUTO_START") != "1", WorkingDir: guestWorkingDirectory, Reconciler: reconciler})
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return exUnavailable
@@ -153,6 +170,64 @@ func runPodman(args []string, composeAlias bool, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "Tusk shim: %s\nSmart Engine policy: %s v%d\nSelected backend: %s\nReal Podman:\n%s", version, cfg.SmartEngine.Policy, cfg.SmartEngine.PolicyVersion, selected, captured.String())
 	}
 	return result.ExitCode
+}
+
+func runShare(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		fmt.Fprintln(stderr, "usage: tusk share list|add|remove")
+		return exUsage
+	}
+	if len(args) == 1 && (args[0] == "--help" || args[0] == "-h") {
+		fmt.Fprintln(stdout, "usage: tusk share list|add|remove")
+		return 0
+	}
+	path := filepath.Join(dataDir(), "shares.json")
+	registry, err := engine.LoadShares(path, filepath.Join(dataDir(), "workspaces"))
+	if err != nil {
+		fmt.Fprintf(stderr, "load shares: %v\n", err)
+		return exSoftware
+	}
+	switch args[0] {
+	case "list":
+		if len(args) != 1 {
+			fmt.Fprintln(stderr, "usage: tusk share list")
+			return exUsage
+		}
+		return writeJSON(stdout, stderr, registry.Shares)
+	case "add":
+		flags := flag.NewFlagSet("share add", flag.ContinueOnError)
+		flags.SetOutput(stderr)
+		name := flags.String("name", "", "stable share name")
+		readOnly := flags.Bool("read-only", false, "export the share read-only")
+		if err := flags.Parse(args[1:]); err != nil || flags.NArg() != 1 {
+			fmt.Fprintln(stderr, "usage: tusk share add <host-path> [--name name] [--read-only]")
+			return exUsage
+		}
+		registry, err = engine.AddShare(registry, flags.Arg(0), *name, *readOnly)
+		if err != nil {
+			fmt.Fprintf(stderr, "add share: %v\n", err)
+			return exUsage
+		}
+	case "remove":
+		if len(args) != 2 {
+			fmt.Fprintln(stderr, "usage: tusk share remove <name>")
+			return exUsage
+		}
+		registry, err = engine.RemoveShare(registry, args[1])
+		if err != nil {
+			fmt.Fprintf(stderr, "remove share: %v\n", err)
+			return exUsage
+		}
+	default:
+		fmt.Fprintf(stderr, "unknown share command %q\n", args[0])
+		return exUsage
+	}
+	if err := engine.SaveShares(path, registry); err != nil {
+		fmt.Fprintf(stderr, "save shares: %v\n", err)
+		return exSoftware
+	}
+	fmt.Fprintln(stdout, "share configuration updated")
+	return 0
 }
 
 func runEnv(args []string, stdout, stderr io.Writer) int {
@@ -547,6 +622,7 @@ func printUsage(writer io.Writer) {
 	fmt.Fprintln(writer, "  podman <args...>           forward to real Podman in selected backend")
 	fmt.Fprintln(writer, "  status                     show selected backend and qualification")
 	fmt.Fprintln(writer, "  env                       print the protected Podman API endpoint")
+	fmt.Fprintln(writer, "  share list|add|remove     manage explicit host shares")
 }
 
 func printEngineUsage(writer io.Writer) {

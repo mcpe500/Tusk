@@ -14,7 +14,9 @@ const RecoveryTuneCommand = "tusk engine tune --mode quick --apply"
 var ErrNoQualifiedBackend = errors.New("no qualified backend is selected")
 
 type ForwardOptions struct {
-	AutoStart bool
+	AutoStart  bool
+	WorkingDir string
+	Reconciler *PortReconciler
 }
 
 // ForwardPodman performs no container logic. It only gates readiness and
@@ -38,7 +40,14 @@ func ForwardPodman(ctx context.Context, adapter Adapter, args []string, stdin io
 			return CommandResult{}, fmt.Errorf("auto-start selected backend: %w", err)
 		}
 	}
-	return adapter.Execute(ctx, Command{Args: append([]string(nil), args...), Stdin: stdin, Stdout: stdout, Stderr: stderr, TTY: tty})
+	result, err := adapter.Execute(ctx, Command{Args: append([]string(nil), args...), Stdin: stdin, Stdout: stdout, Stderr: stderr, TTY: tty, WorkingDir: options.WorkingDir})
+	if err != nil || options.Reconciler == nil {
+		return result, err
+	}
+	if reconcileErr := options.Reconciler.Reconcile(ctx, AdapterPortSource{Adapter: adapter}); reconcileErr != nil {
+		return result, fmt.Errorf("port reconciliation failed; guest resources may be running: %w", reconcileErr)
+	}
+	return result, nil
 }
 
 func PodmanShimHelp(writer io.Writer, backend string) {
