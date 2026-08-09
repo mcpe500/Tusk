@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"encoding/hex"
@@ -20,13 +21,18 @@ import (
 )
 
 const (
-	version     = engine.HostVersion
-	specVersion = "0.2.0"
-	exUsage     = 64
-	exSoftware  = 70
+	version       = engine.HostVersion
+	specVersion   = "0.2.0"
+	exUsage       = 64
+	exUnavailable = 69
+	exSoftware    = 70
 )
 
 func main() {
+	invocation := filepath.Base(os.Args[0])
+	if invocation == "podman" || invocation == "podman-compose" {
+		os.Exit(runPodman(os.Args[1:], invocation == "podman-compose", os.Stdout, os.Stderr))
+	}
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
 
@@ -46,6 +52,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runConfig(args[1:], stdout, stderr)
 	case "engine":
 		return runEngine(args[1:], stdout, stderr)
+	case "podman":
+		return runPodman(args[1:], false, stdout, stderr)
+	case "status":
+		return runStatus(args[1:], stdout, stderr)
+	case "env":
+		return runEnv(args[1:], stdout, stderr)
 	case "help", "-h", "--help":
 		printUsage(stdout)
 		return 0
@@ -54,6 +66,160 @@ func run(args []string, stdout, stderr io.Writer) int {
 		printUsage(stderr)
 		return exUsage
 	}
+}
+
+func runPodman(args []string, composeAlias bool, stdout, stderr io.Writer) int {
+	helpRequested := len(args) == 1 && (args[0] == "--help" || args[0] == "-h" || (composeAlias && args[0] == "help"))
+	if composeAlias && !helpRequested {
+		args = append([]string{"compose"}, args...)
+	}
+	if helpRequested {
+		backend := "auto (qualification required)"
+		if cfg, err := config.Load(filepath.Join(dataDir(), "config.json")); err == nil && cfg.SelectedEngine != "" {
+			backend = cfg.SelectedEngine
+		}
+		engine.PodmanShimHelp(stdout, backend)
+		return 0
+	}
+	device, err := platform.Discover(dataDir())
+	if err != nil {
+		fmt.Fprintf(stderr, "discover device: %v\n", err)
+		return exSoftware
+	}
+	cfg, err := config.Load(filepath.Join(dataDir(), "config.json"))
+	if err != nil {
+		fmt.Fprintf(stderr, "load config: %v\n", err)
+		return exSoftware
+	}
+	selected := cfg.SelectedEngine
+	if selected == "auto" {
+		var report engine.TuneReport
+		if err := state.ReadJSON(filepath.Join(dataDir(), "benchmarks", device.Fingerprint, "tune-report.json"), &report); err == nil {
+			selected = report.Selected
+		}
+	}
+	if selected == "" || selected == "auto" {
+		fmt.Fprintf(stderr, "no qualified backend is selected; run %s\n", engine.RecoveryTuneCommand)
+		return exUnavailable
+	}
+	var candidate engine.Candidate
+	for _, item := range engine.Catalog() {
+		if item.ID == selected {
+			candidate = item
+			break
+		}
+	}
+	if candidate.ID == "" {
+		fmt.Fprintf(stderr, "selected backend %q is unknown; run %s\n", selected, engine.RecoveryTuneCommand)
+		return exUsage
+	}
+	workingDirectory, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(stderr, "resolve working directory: %v\n", err)
+		return exSoftware
+	}
+	if err := engine.ValidateWorkingDirectory(workingDirectory, filepath.Join(dataDir(), "workspaces"), args); err != nil {
+		fmt.Fprintln(stderr, err)
+		return exUsage
+	}
+	resources := make(map[string]engine.BackendResources, len(cfg.Engines))
+	for id, value := range cfg.Engines {
+		resources[id] = engine.BackendResources{CPUs: value.CPUs, MemoryMiB: value.MemoryMiB}
+	}
+	factory := engine.NewLocalCandidateFactoryWithProbeAndResources(dataDir(), device, os.Getenv("TUSK_PROBE_IMAGE"), resources)
+	target, err := factory(context.Background(), candidate)
+	if err != nil {
+		fmt.Fprintf(stderr, "initialize selected backend %s: %v\n", selected, err)
+		return exUnavailable
+	}
+	adapterTarget, ok := target.(engine.AdapterTarget)
+	if !ok || adapterTarget.Adapter == nil {
+		fmt.Fprintln(stderr, "selected backend does not expose a Podman adapter")
+		return exSoftware
+	}
+	tty := terminalFile(os.Stdin) && terminalWriter(stdout)
+	versionOutput := len(args) > 0 && args[0] == "version" && !containsOutputFormat(args[1:])
+	output := stdout
+	var captured bytes.Buffer
+	if versionOutput {
+		output = &captured
+	}
+	result, err := engine.ForwardPodman(context.Background(), adapterTarget.Adapter, args, os.Stdin, output, stderr, tty, engine.ForwardOptions{AutoStart: os.Getenv("TUSK_NO_AUTO_START") != "1"})
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return exUnavailable
+	}
+	if versionOutput {
+		fmt.Fprintf(stdout, "Tusk shim: %s\nSmart Engine policy: %s v%d\nSelected backend: %s\nReal Podman:\n%s", version, cfg.SmartEngine.Policy, cfg.SmartEngine.PolicyVersion, selected, captured.String())
+	}
+	return result.ExitCode
+}
+
+func runEnv(args []string, stdout, stderr io.Writer) int {
+	if len(args) != 0 {
+		fmt.Fprintln(stderr, "usage: tusk env")
+		return exUsage
+	}
+	device, err := platform.Discover(dataDir())
+	if err != nil {
+		fmt.Fprintf(stderr, "discover device: %v\n", err)
+		return exSoftware
+	}
+	cfg, err := config.Load(filepath.Join(dataDir(), "config.json"))
+	if err != nil {
+		fmt.Fprintf(stderr, "load config: %v\n", err)
+		return exSoftware
+	}
+	selected := cfg.SelectedEngine
+	if selected == "auto" {
+		var report engine.TuneReport
+		_ = state.ReadJSON(filepath.Join(dataDir(), "benchmarks", device.Fingerprint, "tune-report.json"), &report)
+		selected = report.Selected
+	}
+	if selected == "" || selected == "auto" {
+		fmt.Fprintf(stderr, "no qualified backend is selected; run %s\n", engine.RecoveryTuneCommand)
+		return exUnavailable
+	}
+	fmt.Fprintf(stdout, "DOCKER_HOST=unix://%s\n", filepath.Join(dataDir(), "run", selected, "podman.sock"))
+	return 0
+}
+
+func containsOutputFormat(args []string) bool {
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "--format") || arg == "--json" {
+			return true
+		}
+	}
+	return false
+}
+
+func runStatus(args []string, stdout, stderr io.Writer) int {
+	if len(args) != 0 {
+		fmt.Fprintln(stderr, "usage: tusk status")
+		return exUsage
+	}
+	device, err := platform.Discover(dataDir())
+	if err != nil {
+		fmt.Fprintf(stderr, "discover device: %v\n", err)
+		return exSoftware
+	}
+	var report engine.TuneReport
+	if err := state.ReadJSON(filepath.Join(dataDir(), "benchmarks", device.Fingerprint, "tune-report.json"), &report); err != nil {
+		fmt.Fprintf(stdout, "Selected backend: none\nQualification report: unavailable\nRecovery: %s\n", engine.RecoveryTuneCommand)
+		return 0
+	}
+	fmt.Fprintf(stdout, "Selected backend: %s\nTune mode: %s\nPolicy: %s v%d\n", report.Selected, report.Mode, report.Policy.Name, report.Policy.Version)
+	return 0
+}
+
+func terminalFile(file *os.File) bool {
+	info, err := file.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
+}
+
+func terminalWriter(writer io.Writer) bool {
+	file, ok := writer.(*os.File)
+	return ok && terminalFile(file)
 }
 
 func runDevice(args []string, stdout, stderr io.Writer) int {
@@ -378,6 +544,9 @@ func printUsage(writer io.Writer) {
 	fmt.Fprintln(writer, "  engine tune [options]      run real qualification and benchmark")
 	fmt.Fprintln(writer, "  engine list [--ranked]     list candidates or ranked evidence")
 	fmt.Fprintln(writer, "  engine current             show selected backend evidence")
+	fmt.Fprintln(writer, "  podman <args...>           forward to real Podman in selected backend")
+	fmt.Fprintln(writer, "  status                     show selected backend and qualification")
+	fmt.Fprintln(writer, "  env                       print the protected Podman API endpoint")
 }
 
 func printEngineUsage(writer io.Writer) {

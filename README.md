@@ -17,6 +17,7 @@ The canonical product and system contract is:
 | M2 Probe and qualification framework | Complete |
 | M3 Proot candidates | In progress (AT-019 device gate pending) |
 | M4 QEMU candidate matrix | In progress (real-device gates pending) |
+| M5 Podman host bridge | In progress (real backend gates pending) |
 
 M1 includes:
 

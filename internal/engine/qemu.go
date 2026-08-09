@@ -47,6 +47,9 @@ type QEMUAdapter struct {
 	statePath     string
 	process       *exec.Cmd
 	processCancel context.CancelFunc
+	apiService    *exec.Cmd
+	apiBridge     *exec.Cmd
+	apiCancel     context.CancelFunc
 	lastStart     time.Duration
 	lastStop      time.Duration
 }
@@ -231,6 +234,11 @@ func (adapter *QEMUAdapter) Start(ctx context.Context) error {
 		_ = adapter.writeState(qemuState{SchemaVersion: qemuStateSchemaVersion, CandidateID: adapter.config.CandidateID, State: StateError, LastError: err.Error()})
 		return fmt.Errorf("QEMU guest health failed (serial log %s): %w", adapter.serialPath(), err)
 	}
+	if err := adapter.startAPIBridge(ctx); err != nil {
+		_ = adapter.stopLocked(context.Background(), true)
+		_ = adapter.writeState(qemuState{SchemaVersion: qemuStateSchemaVersion, CandidateID: adapter.config.CandidateID, State: StateDegraded, LastError: err.Error(), SSHPort: adapter.config.SSHPort})
+		return err
+	}
 	if _, err := adapter.Health(ctx); err != nil {
 		_ = adapter.stopLocked(context.Background(), true)
 		_ = adapter.writeState(qemuState{SchemaVersion: qemuStateSchemaVersion, CandidateID: adapter.config.CandidateID, State: StateDegraded, LastError: err.Error()})
@@ -253,9 +261,24 @@ func (adapter *QEMUAdapter) stopLocked(ctx context.Context, force bool) error {
 	adapter.mu.Lock()
 	process := adapter.process
 	cancel := adapter.processCancel
+	apiService := adapter.apiService
+	apiBridge := adapter.apiBridge
+	apiCancel := adapter.apiCancel
 	adapter.process = nil
 	adapter.processCancel = nil
+	adapter.apiService = nil
+	adapter.apiBridge = nil
+	adapter.apiCancel = nil
 	adapter.mu.Unlock()
+	if apiCancel != nil {
+		apiCancel()
+	}
+	for _, apiProcess := range []*exec.Cmd{apiService, apiBridge} {
+		if apiProcess != nil && apiProcess.Process != nil {
+			_ = apiProcess.Process.Kill()
+			_, _ = apiProcess.Process.Wait()
+		}
+	}
 	if process == nil {
 		stored, _ := adapter.readState()
 		if stored.PID > 0 && processStartTicks(stored.PID) == stored.StartTicks {
@@ -313,6 +336,11 @@ func (adapter *QEMUAdapter) Status(_ context.Context) (RuntimeStatus, error) {
 	if stored.State == StateReady && (stored.PID <= 0 || processStartTicks(stored.PID) != stored.StartTicks) {
 		return RuntimeStatus{State: StateDegraded, Detail: "QEMU process identity is stale"}, errors.New("QEMU process identity is stale")
 	}
+	if stored.State == StateReady {
+		if err := adapter.verifyUnixAPI(context.Background()); err != nil {
+			return RuntimeStatus{State: StateDegraded, Detail: err.Error()}, err
+		}
+	}
 	return RuntimeStatus{State: stored.State, Healthy: stored.State == StateReady, Detail: stored.LastError}, nil
 }
 
@@ -321,7 +349,43 @@ func (adapter *QEMUAdapter) Execute(ctx context.Context, command Command) (Comma
 }
 
 func (adapter *QEMUAdapter) APIEndpoint(_ context.Context) (string, error) {
-	return "", errors.New("QEMU Podman API bridge is provided by M5")
+	stored, err := adapter.readState()
+	if err != nil || stored.State != StateReady {
+		return "", errors.New("QEMU Podman API bridge is unavailable")
+	}
+	if err := adapter.verifyUnixAPI(context.Background()); err != nil {
+		return "", err
+	}
+	return filepath.Join(adapter.config.RuntimeDir, "podman.sock"), nil
+}
+
+func (adapter *QEMUAdapter) RecreateAPI(ctx context.Context) error {
+	adapter.lifecycleMu.Lock()
+	defer adapter.lifecycleMu.Unlock()
+	adapter.mu.Lock()
+	service, bridge, cancel := adapter.apiService, adapter.apiBridge, adapter.apiCancel
+	adapter.apiService, adapter.apiBridge, adapter.apiCancel = nil, nil, nil
+	adapter.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	for _, process := range []*exec.Cmd{service, bridge} {
+		if process != nil && process.Process != nil {
+			_ = process.Process.Kill()
+			_, _ = process.Process.Wait()
+		}
+	}
+	_ = os.Remove(filepath.Join(adapter.config.RuntimeDir, "podman.sock"))
+	if err := adapter.startAPIBridge(ctx); err != nil {
+		_ = adapter.writeState(qemuState{SchemaVersion: qemuStateSchemaVersion, CandidateID: adapter.config.CandidateID, State: StateDegraded, LastError: err.Error(), SSHPort: adapter.config.SSHPort})
+		return err
+	}
+	if _, err := adapter.Health(ctx); err != nil {
+		_ = adapter.writeState(qemuState{SchemaVersion: qemuStateSchemaVersion, CandidateID: adapter.config.CandidateID, State: StateDegraded, LastError: err.Error(), SSHPort: adapter.config.SSHPort})
+		return err
+	}
+	stored, _ := adapter.readState()
+	return adapter.writeState(qemuState{SchemaVersion: qemuStateSchemaVersion, CandidateID: adapter.config.CandidateID, State: StateReady, PID: stored.PID, StartTicks: stored.StartTicks, SSHPort: adapter.config.SSHPort})
 }
 
 func (adapter *QEMUAdapter) Health(ctx context.Context) (RuntimeStatus, error) {
@@ -415,7 +479,7 @@ func (adapter *QEMUAdapter) executeSSH(ctx context.Context, command Command) (Co
 		}
 		remote = append([]string{"env"}, append(prefix, remote...)...)
 	}
-	args := []string{"-i", adapter.config.SSHPrivateKey, "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", "UserKnownHostsFile=" + adapter.config.KnownHosts, "-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=2", "-p", strconv.Itoa(adapter.config.SSHPort), adapter.config.SSHUser + "@127.0.0.1", "--", strings.Join(remote, " ")}
+	args := adapter.sshArgs(strings.Join(remote, " "))
 	process := exec.CommandContext(ctx, "ssh", args...)
 	process.Stdin = command.Stdin
 	var stdout, stderr bytes.Buffer
@@ -437,6 +501,87 @@ func (adapter *QEMUAdapter) executeSSH(ctx context.Context, command Command) (Co
 		return result, nil
 	}
 	return result, err
+}
+
+func (adapter *QEMUAdapter) sshBaseArgs() []string {
+	return []string{"-i", adapter.config.SSHPrivateKey, "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", "UserKnownHostsFile=" + adapter.config.KnownHosts, "-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=2", "-p", strconv.Itoa(adapter.config.SSHPort), adapter.config.SSHUser + "@127.0.0.1"}
+}
+
+func (adapter *QEMUAdapter) sshArgs(remote string) []string {
+	return append(adapter.sshBaseArgs(), "--", remote)
+}
+
+func (adapter *QEMUAdapter) startAPIBridge(ctx context.Context) error {
+	if adapter.verifyUnixAPI(ctx) == nil {
+		return nil
+	}
+	serviceContext, cancel := context.WithCancel(context.Background())
+	serviceArgs := adapter.sshArgs("podman system service --time=0 unix:///run/tusk/podman.sock")
+	service := exec.CommandContext(serviceContext, "ssh", serviceArgs...)
+	logFile, err := os.OpenFile(adapter.serialPath(), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		cancel()
+		return fmt.Errorf("open QEMU API log: %w", err)
+	}
+	service.Stdout, service.Stderr = logFile, logFile
+	if err := service.Start(); err != nil {
+		_ = logFile.Close()
+		cancel()
+		return fmt.Errorf("start guest Podman API service: %w", err)
+	}
+	bridgeArgs := append(adapter.sshBaseArgs(), "-N", "-T", "-o", "ExitOnForwardFailure=yes", "-L", filepath.Join(adapter.config.RuntimeDir, "podman.sock")+":/run/tusk/podman.sock")
+	bridge := exec.CommandContext(serviceContext, "ssh", bridgeArgs...)
+	bridge.Stdout, bridge.Stderr = logFile, logFile
+	if err := bridge.Start(); err != nil {
+		_ = service.Process.Kill()
+		_, _ = service.Process.Wait()
+		_ = logFile.Close()
+		cancel()
+		return fmt.Errorf("start QEMU API bridge: %w", err)
+	}
+	_ = logFile.Close()
+	adapter.mu.Lock()
+	adapter.apiService, adapter.apiBridge, adapter.apiCancel = service, bridge, cancel
+	adapter.mu.Unlock()
+	deadline := time.NewTimer(10 * time.Second)
+	defer deadline.Stop()
+	for {
+		if adapter.verifyUnixAPI(ctx) == nil {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline.C:
+			return errors.New("timed out waiting for QEMU Podman API bridge")
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+}
+
+func (adapter *QEMUAdapter) verifyUnixAPI(ctx context.Context) error {
+	connection, err := net.DialTimeout("unix", filepath.Join(adapter.config.RuntimeDir, "podman.sock"), 500*time.Millisecond)
+	if err != nil {
+		return err
+	}
+	defer connection.Close()
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = connection.SetDeadline(deadline)
+	} else {
+		_ = connection.SetDeadline(time.Now().Add(500 * time.Millisecond))
+	}
+	if _, err := io.WriteString(connection, "GET /_ping HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"); err != nil {
+		return err
+	}
+	response := make([]byte, 256)
+	count, err := connection.Read(response)
+	if err != nil {
+		return err
+	}
+	if !strings.Contains(string(response[:count]), " 200 ") {
+		return errors.New("QEMU Podman API did not return HTTP 200")
+	}
+	return nil
 }
 
 func (adapter *QEMUAdapter) waitReady(ctx context.Context) error {
