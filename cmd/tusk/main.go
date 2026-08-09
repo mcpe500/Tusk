@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -65,6 +66,18 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runEnv(args[1:], stdout, stderr)
 	case "share":
 		return runShare(args[1:], stdout, stderr)
+	case "doctor":
+		return runDoctor(args[1:], stdout, stderr)
+	case "backup":
+		return runBackup(args[1:], stdout, stderr)
+	case "uninstall":
+		return runUninstall(args[1:], stdout, stderr)
+	case "update":
+		return runUpdate(args[1:], stdout, stderr)
+	case "acceptance":
+		return runAcceptance(args[1:], stdout, stderr)
+	case "logs":
+		return runLogs(args[1:], stdout, stderr)
 	case "help", "-h", "--help":
 		printUsage(stdout)
 		return 0
@@ -310,6 +323,199 @@ func runStatus(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 	fmt.Fprintf(stdout, "Selected backend: %s\nTune mode: %s\nPolicy: %s v%d\n", report.Selected, report.Mode, report.Policy.Name, report.Policy.Version)
+	return 0
+}
+
+func runDoctor(args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("doctor", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	jsonOutput := flags.Bool("json", false, "print JSON")
+	bundle := flags.String("bundle", "", "write a redacted diagnostic bundle")
+	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
+		fmt.Fprintln(stderr, "usage: tusk doctor [--json]")
+		return exUsage
+	}
+	device, err := platform.Discover(dataDir())
+	if err != nil {
+		fmt.Fprintf(stderr, "discover device: %v\n", err)
+		return exSoftware
+	}
+	report := struct {
+		SchemaVersion int                `json:"schemaVersion"`
+		Device        platform.Device    `json:"device"`
+		Candidates    []engine.Discovery `json:"candidates"`
+		Recovery      string             `json:"recovery"`
+	}{SchemaVersion: 1, Device: device, Candidates: engine.DiscoverCandidates(device), Recovery: engine.RecoveryTuneCommand}
+	if *bundle != "" {
+		files := []string{"config.json", "shares.json", "acceptance.json", "update-plan.json"}
+		fmt.Fprintf(stdout, "Diagnostic bundle files: %v\n", files)
+		if err := engine.CreateDiagnosticBundle(*bundle, dataDir(), files); err != nil {
+			fmt.Fprintf(stderr, "create diagnostic bundle: %v\n", err)
+			return exSoftware
+		}
+		fmt.Fprintf(stdout, "Diagnostic bundle: %s\n", *bundle)
+	}
+	if *jsonOutput {
+		return writeJSON(stdout, stderr, report)
+	}
+	fmt.Fprintf(stdout, "Host: %s/%s\nCandidates: %d\nRecovery: %s\n", device.HostOS, device.HostArch, len(report.Candidates), report.Recovery)
+	return 0
+}
+
+func runLogs(args []string, stdout, stderr io.Writer) int {
+	if len(args) != 1 {
+		fmt.Fprintln(stderr, "usage: tusk logs engine|backend|benchmark|install|update")
+		return exUsage
+	}
+	paths := map[string]string{"engine": "engine.log", "backend": "backend.log", "benchmark": "benchmark.log", "install": "install.log", "update": "update.log"}
+	relative, ok := paths[args[0]]
+	if !ok {
+		fmt.Fprintf(stderr, "unknown log category %q\n", args[0])
+		return exUsage
+	}
+	path := filepath.Join(dataDir(), "logs", relative)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintf(stderr, "read %s: %v\n", path, err)
+		return exSoftware
+	}
+	const maxLogBytes = 64 * 1024
+	if len(data) > maxLogBytes {
+		data = data[len(data)-maxLogBytes:]
+	}
+	_, _ = stdout.Write(data)
+	return 0
+}
+
+func runBackup(args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("backup", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	source := flags.String("source", "", "backend data directory")
+	destination := flags.String("output", "", "backup archive path")
+	backend := flags.String("backend", "", "backend ID")
+	stopped := flags.Bool("stopped", false, "assert the backend is stopped before backup")
+	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
+		fmt.Fprintln(stderr, "usage: tusk backup --backend <id> --source <data-dir> --output <archive.tar.gz> --stopped")
+		return exUsage
+	}
+	if *source == "" && *backend != "" {
+		*source = filepath.Join(dataDir(), "engines", *backend, "data")
+	}
+	if *source == "" || *destination == "" || *backend == "" || !*stopped {
+		fmt.Fprintln(stderr, "backup requires --backend, --source, --output, and --stopped")
+		return exUsage
+	}
+	device, err := platform.Discover(dataDir())
+	if err != nil {
+		fmt.Fprintf(stderr, "discover device: %v\n", err)
+		return exSoftware
+	}
+	metadata, err := engine.CreateBackup(context.Background(), *source, *destination, engine.BackupMetadata{BackendID: *backend, Architecture: device.HostArch, TuskVersion: version, RuntimeVersion: version, DataSchema: 1, WorkspaceOutside: true, Stopped: true})
+	if err != nil {
+		fmt.Fprintf(stderr, "backup: %v\n", err)
+		return exSoftware
+	}
+	return writeJSON(stdout, stderr, metadata)
+}
+
+func runUninstall(args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("uninstall", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	purge := flags.Bool("purge-data", false, "also delete backend data; required explicitly")
+	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
+		fmt.Fprintln(stderr, "usage: tusk uninstall [--purge-data]")
+		return exUsage
+	}
+	adapter, _, resolveErr := selectedAdapterForOperations()
+	if resolveErr != nil && !strings.Contains(resolveErr.Error(), "no qualified backend") {
+		fmt.Fprintf(stderr, "inspect active backend: %v\n", resolveErr)
+		return exUnavailable
+	}
+	stop := func() error { return nil }
+	if adapter != nil {
+		stop = func() error { return adapter.Stop(context.Background(), false) }
+	}
+	if err := engine.Uninstall(engine.UninstallOptions{Root: dataDir(), PurgeData: *purge, Stop: stop}); err != nil {
+		fmt.Fprintf(stderr, "uninstall: %v\n", err)
+		return exSoftware
+	}
+	fmt.Fprintln(stdout, "Tusk configuration removed; workspaces and registered shares were preserved")
+	return 0
+}
+
+func selectedAdapterForOperations() (engine.Adapter, string, error) {
+	device, err := platform.Discover(dataDir())
+	if err != nil {
+		return nil, "", err
+	}
+	cfg, err := config.Load(filepath.Join(dataDir(), "config.json"))
+	if err != nil {
+		return nil, "", err
+	}
+	selected := cfg.SelectedEngine
+	if selected == "auto" {
+		var report engine.TuneReport
+		if err := state.ReadJSON(filepath.Join(dataDir(), "benchmarks", device.Fingerprint, "tune-report.json"), &report); err == nil {
+			selected = report.Selected
+		}
+	}
+	if selected == "" || selected == "auto" {
+		return nil, "", engine.ErrNoQualifiedBackend
+	}
+	var candidate engine.Candidate
+	for _, item := range engine.Catalog() {
+		if item.ID == selected {
+			candidate = item
+			break
+		}
+	}
+	if candidate.ID == "" {
+		return nil, selected, fmt.Errorf("selected backend %q is unknown", selected)
+	}
+	resources := make(map[string]engine.BackendResources, len(cfg.Engines))
+	for id, value := range cfg.Engines {
+		resources[id] = engine.BackendResources{CPUs: value.CPUs, MemoryMiB: value.MemoryMiB}
+	}
+	factory := engine.NewLocalCandidateFactoryWithProbeAndResources(dataDir(), device, os.Getenv("TUSK_PROBE_IMAGE"), resources)
+	target, err := factory(context.Background(), candidate)
+	if err != nil {
+		return nil, selected, err
+	}
+	adapterTarget, ok := target.(engine.AdapterTarget)
+	if !ok {
+		return nil, selected, errors.New("selected backend adapter is unavailable")
+	}
+	return adapterTarget.Adapter, selected, nil
+}
+
+func runUpdate(args []string, stdout, stderr io.Writer) int {
+	if len(args) != 1 || args[0] != "check" {
+		fmt.Fprintln(stderr, "usage: tusk update check")
+		return exUsage
+	}
+	var plan engine.UpdatePlan
+	if err := state.ReadJSON(filepath.Join(dataDir(), "update-plan.json"), &plan); err != nil {
+		fmt.Fprintf(stderr, "update check: %v\n", err)
+		return exSoftware
+	}
+	return writeJSON(stdout, stderr, plan)
+}
+
+func runAcceptance(args []string, stdout, stderr io.Writer) int {
+	if len(args) != 1 || args[0] != "status" {
+		fmt.Fprintln(stderr, "usage: tusk acceptance status")
+		return exUsage
+	}
+	matrix, err := engine.LoadAcceptanceMatrix(filepath.Join(dataDir(), "acceptance.json"))
+	if err != nil {
+		fmt.Fprintf(stdout, "MVP acceptance: incomplete (%v)\n", err)
+		return 0
+	}
+	if err := matrix.ValidateMVP(); err != nil {
+		fmt.Fprintf(stdout, "MVP acceptance: incomplete (%v)\n", err)
+		return 0
+	}
+	fmt.Fprintln(stdout, "MVP acceptance: complete")
 	return 0
 }
 
@@ -651,6 +857,11 @@ func printUsage(writer io.Writer) {
 	fmt.Fprintln(writer, "  status                     show selected backend and qualification")
 	fmt.Fprintln(writer, "  env                       print the protected Podman API endpoint")
 	fmt.Fprintln(writer, "  share list|add|remove     manage explicit host shares")
+	fmt.Fprintln(writer, "  doctor [--json]           run non-destructive diagnostics")
+	fmt.Fprintln(writer, "  backup --backend ...      create a verified backend backup")
+	fmt.Fprintln(writer, "  uninstall [--purge-data] remove Tusk safely")
+	fmt.Fprintln(writer, "  update check              show staged update plan")
+	fmt.Fprintln(writer, "  acceptance status         show release acceptance evidence")
 }
 
 func printEngineUsage(writer io.Writer) {

@@ -20,6 +20,7 @@ The canonical product and system contract is:
 | M5 Podman host bridge | In progress (real backend gates pending) |
 | M6 Storage and networking integration | In progress (real backend gates pending) |
 | M7 Compose workflow | In progress (real backend gates pending) |
+| M8 Operations and release hardening | In progress (release gates pending) |
 
 M1 includes:
 
