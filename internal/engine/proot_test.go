@@ -75,3 +75,32 @@ func TestProotPreflightReportsMissingRootfsWithoutQualification(t *testing.T) {
 		t.Fatalf("missing rootfs was available: %#v", preflight)
 	}
 }
+
+func TestProotStatusRejectsStaleReadyProcessIdentity(t *testing.T) {
+	t.Parallel()
+	directory := t.TempDir()
+	rootfs := filepath.Join(directory, "rootfs")
+	if err := os.MkdirAll(rootfs, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	adapter, err := NewProotAdapter(ProotConfig{
+		CandidateID: "proot-native",
+		ProotPath:   "/usr/bin/proot",
+		Rootfs:      rootfs,
+		DataDir:     filepath.Join(directory, "data"),
+		SharedRoot:  filepath.Join(directory, "shared"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := adapter.Initialize(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := adapter.writeState(prootState{SchemaVersion: prootStateSchemaVersion, CandidateID: "proot-native", State: StateReady, PID: 999999999, StartTicks: 1}); err != nil {
+		t.Fatal(err)
+	}
+	status, err := adapter.Status(context.Background())
+	if err == nil || status.State != StateDegraded || !strings.Contains(status.Detail, "stale") {
+		t.Fatalf("Status() = %#v, %v; want stale identity rejection", status, err)
+	}
+}

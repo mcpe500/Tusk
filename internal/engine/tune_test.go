@@ -33,3 +33,28 @@ func TestRunTuneAttemptsUnavailableCandidatesAndPersistsRejection(t *testing.T) 
 		t.Fatalf("LoadTuneJournal() error = %v", err)
 	}
 }
+
+func TestRunTuneDoesNotCompleteCandidateAfterCancellation(t *testing.T) {
+	t.Parallel()
+	directory := t.TempDir()
+	device := platform.Device{HostArch: "arm64", Fingerprint: "device-test", StorageAvailableBytes: 1 << 30, Commands: map[string]string{}}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := RunTune(ctx, device, DiscoverCandidates(device), nil, TuneOptions{
+		Mode:        TuneQuick,
+		Policy:      BalancedPolicy(),
+		ProbeImage:  "image@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		RunID:       "tune-cancelled",
+		EvidenceDir: directory,
+	})
+	if err == nil {
+		t.Fatal("RunTune() unexpectedly completed after cancellation")
+	}
+	journal, err := LoadTuneJournal(filepath.Join(directory, "tune-journal.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(journal.Completed) != 0 {
+		t.Fatalf("cancelled candidate was marked complete: %#v", journal.Completed)
+	}
+}

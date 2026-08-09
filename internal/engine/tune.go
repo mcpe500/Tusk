@@ -74,6 +74,18 @@ func RunTune(ctx context.Context, device platform.Device, discoveries []Discover
 			item, err := LoadEvidence(options.EvidenceDir, discovery.Candidate.ID)
 			if err == nil && item.Fingerprint == cacheFingerprint {
 				evidence = append(evidence, item)
+				if err := ctx.Err(); err != nil {
+					journal.Interrupted = true
+					if journalErr := SaveTuneJournal(journalPath, journal); journalErr != nil {
+						return report, fmt.Errorf("tune interrupted and journal save failed: %w (journal: %v)", err, journalErr)
+					}
+					report.Interrupted = true
+					report.FinishedAt = time.Now().UTC()
+					if reportErr := SaveTuneReport(filepath.Join(options.EvidenceDir, "tune-report.json"), report); reportErr != nil {
+						return report, fmt.Errorf("tune interrupted and report save failed: %w (report: %v)", err, reportErr)
+					}
+					return report, err
+				}
 				continue
 			}
 		}
@@ -125,15 +137,20 @@ func RunTune(ctx context.Context, device platform.Device, discoveries []Discover
 			return report, err
 		}
 		evidence = append(evidence, item)
-		journal.Completed = appendUnique(journal.Completed, discovery.Candidate.ID)
-		if err := SaveTuneJournal(journalPath, journal); err != nil {
-			return report, err
-		}
 		if err := ctx.Err(); err != nil {
 			journal.Interrupted = true
-			_ = SaveTuneJournal(journalPath, journal)
+			if journalErr := SaveTuneJournal(journalPath, journal); journalErr != nil {
+				return report, fmt.Errorf("tune interrupted and journal save failed: %w (journal: %v)", err, journalErr)
+			}
 			report.Interrupted = true
 			report.FinishedAt = time.Now().UTC()
+			if reportErr := SaveTuneReport(filepath.Join(options.EvidenceDir, "tune-report.json"), report); reportErr != nil {
+				return report, fmt.Errorf("tune interrupted and report save failed: %w (report: %v)", err, reportErr)
+			}
+			return report, err
+		}
+		journal.Completed = appendUnique(journal.Completed, discovery.Candidate.ID)
+		if err := SaveTuneJournal(journalPath, journal); err != nil {
 			return report, err
 		}
 	}
@@ -209,10 +226,20 @@ func qualifyTarget(ctx context.Context, discovery Discovery, factory CandidateTa
 }
 
 func SaveTuneReport(path string, report TuneReport) error {
+	if err := ValidateTuneReport(report); err != nil {
+		return err
+	}
+	return state.WriteJSON(path, report, 0o600)
+}
+
+func ValidateTuneReport(report TuneReport) error {
 	if report.SchemaVersion != runSchemaVersion || report.RunID == "" {
 		return errors.New("invalid tune report")
 	}
-	return state.WriteJSON(path, report, 0o600)
+	if report.FinishedAt.IsZero() {
+		return errors.New("tune report is unfinished")
+	}
+	return nil
 }
 
 func findEvidence(items []Evidence, candidateID string) (Evidence, bool) {

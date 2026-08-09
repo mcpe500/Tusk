@@ -138,8 +138,12 @@ func TranslateHostPath(path, workingDirectory string, registry ShareRegistry) (s
 	if err != nil {
 		return "", err
 	}
+	resolvedPath, err := resolvePathForContainment(path)
+	if err != nil {
+		return "", err
+	}
 	for _, share := range registry.Shares {
-		if relative, ok := relativeWithin(share.HostPath, path); ok {
+		if relative, ok := relativeWithin(share.HostPath, resolvedPath); ok {
 			if relative == "." {
 				return share.GuestPath, nil
 			}
@@ -309,12 +313,41 @@ func shareIsReadOnly(path, workingDirectory string, registry ShareRegistry) bool
 	if err != nil {
 		return false
 	}
+	absolute, err = resolvePathForContainment(absolute)
+	if err != nil {
+		return false
+	}
 	for _, share := range registry.Shares {
 		if _, ok := relativeWithin(share.HostPath, absolute); ok {
 			return share.ReadOnly
 		}
 	}
 	return false
+}
+
+func resolvePathForContainment(path string) (string, error) {
+	path = filepath.Clean(path)
+	suffix := []string{}
+	for current := path; ; current = filepath.Dir(current) {
+		if info, err := os.Lstat(current); err == nil && info.Mode()&os.ModeSymlink != 0 {
+			return "", fmt.Errorf("path contains symlink component %q", current)
+		}
+		resolved, err := filepath.EvalSymlinks(current)
+		if err == nil {
+			for index := len(suffix) - 1; index >= 0; index-- {
+				resolved = filepath.Join(resolved, suffix[index])
+			}
+			return filepath.Clean(resolved), nil
+		}
+		if !os.IsNotExist(err) {
+			return "", err
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return path, nil
+		}
+		suffix = append(suffix, filepath.Base(current))
+	}
 }
 
 func containsReadOnly(options []string) bool {

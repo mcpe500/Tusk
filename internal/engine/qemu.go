@@ -689,11 +689,19 @@ func processStartTicks(pid int) uint64 {
 	if err != nil {
 		return 0
 	}
-	fields := strings.Fields(string(data))
-	if len(fields) <= 21 {
+	return parseProcessStartTicks(string(data))
+}
+
+func parseProcessStartTicks(line string) uint64 {
+	closeComm := strings.LastIndexByte(line, ')')
+	if closeComm < 0 {
 		return 0
 	}
-	ticks, _ := strconv.ParseUint(fields[21], 10, 64)
+	fields := strings.Fields(line[closeComm+1:])
+	if len(fields) <= 19 {
+		return 0
+	}
+	ticks, _ := strconv.ParseUint(fields[19], 10, 64)
 	return ticks
 }
 

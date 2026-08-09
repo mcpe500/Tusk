@@ -73,3 +73,14 @@ func TestShellQuotePreventsRemoteCommandInjection(t *testing.T) {
 		t.Fatalf("unsafe remote quoting: %q", quoted)
 	}
 }
+
+func TestParseProcessStartTicksHandlesSpacesAndParenthesesInCommandName(t *testing.T) {
+	line := "123 (name with ) chars) S"
+	for index := 0; index < 18; index++ {
+		line += " 0"
+	}
+	line += " 12345"
+	if got := parseProcessStartTicks(line); got != 12345 {
+		t.Fatalf("parseProcessStartTicks() = %d, want 12345", got)
+	}
+}

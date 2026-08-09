@@ -131,6 +131,12 @@ func runPodman(args []string, composeAlias bool, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "no qualified backend is selected; run %s\n", engine.RecoveryTuneCommand)
 		return exUnavailable
 	}
+	if !cfg.SmartEngine.AllowUnqualified {
+		if err := qualifiedSelection(cfg, device, selected); err != nil {
+			fmt.Fprintf(stderr, "backend %s is not qualified: %v\n", selected, err)
+			return exUnavailable
+		}
+	}
 	var composeMetadata engine.ComposeMetadata
 	if isCompose && !helpRequested {
 		composeMetadata, err = engine.LoadComposeMetadata(filepath.Join(dataDir(), "engines", selected, "compose.json"))
@@ -196,7 +202,7 @@ func runPodman(args []string, composeAlias bool, stdout, stderr io.Writer) int {
 	if versionOutput {
 		output = &captured
 	}
-	result, err := engine.ForwardPodman(context.Background(), adapterTarget.Adapter, translatedArgs, os.Stdin, output, stderr, tty, engine.ForwardOptions{AutoStart: os.Getenv("TUSK_NO_AUTO_START") != "1", WorkingDir: guestWorkingDirectory, Reconciler: reconciler})
+	result, err := engine.ForwardPodman(context.Background(), adapterTarget.Adapter, translatedArgs, os.Stdin, output, stderr, tty, engine.ForwardOptions{AutoStart: cfg.AutoStart && os.Getenv("TUSK_NO_AUTO_START") != "1", WorkingDir: guestWorkingDirectory, Reconciler: reconciler})
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return exUnavailable
@@ -655,7 +661,7 @@ func runEngineTune(args []string, stdout, stderr io.Writer) int {
 		Policy:         policy,
 		ProbeImage:     *probeImage,
 		Force:          *force,
-		Apply:          *apply,
+		Apply:          false,
 		EvidenceDir:    filepath.Join(dataDir(), "benchmarks", device.Fingerprint),
 		ProbeManifest:  &manifest,
 		ProbePublicKey: ed25519.PublicKey(publicKey),
@@ -664,11 +670,75 @@ func runEngineTune(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "tune engine: %v\n", err)
 		return exSoftware
 	}
+	if *apply && report.Selected != "" {
+		previousConfig := cfg
+		cfg.SelectedEngine = report.Selected
+		if err := config.Save(filepath.Join(dataDir(), "config.json"), cfg); err != nil {
+			fmt.Fprintf(stderr, "apply selected backend: %v\n", err)
+			return exSoftware
+		}
+		report.Applied = true
+		if err := engine.SaveTuneReport(filepath.Join(dataDir(), "benchmarks", device.Fingerprint, "tune-report.json"), report); err != nil {
+			rollbackErr := config.Save(filepath.Join(dataDir(), "config.json"), previousConfig)
+			fmt.Fprintf(stderr, "record applied backend: %v\n", err)
+			if rollbackErr != nil {
+				fmt.Fprintf(stderr, "rollback selected backend: %v\n", rollbackErr)
+			}
+			return exSoftware
+		}
+	}
 	if *jsonOutput {
 		return writeJSON(stdout, stderr, report)
 	}
 	printTuneReport(stdout, report)
 	return 0
+}
+
+func qualifiedSelection(cfg config.Config, device platform.Device, selected string) error {
+	var report engine.TuneReport
+	if err := state.ReadJSON(filepath.Join(dataDir(), "benchmarks", device.Fingerprint, "tune-report.json"), &report); err != nil {
+		return errors.New("no tune evidence is available")
+	}
+	if err := engine.ValidateTuneReport(report); err != nil || report.Interrupted || report.Device.Fingerprint != device.Fingerprint {
+		return errors.New("tune evidence is incomplete or belongs to another device")
+	}
+	if report.Policy.Name != cfg.SmartEngine.Policy || report.Policy.Version != cfg.SmartEngine.PolicyVersion {
+		return errors.New("tune evidence uses an outdated Smart Engine policy")
+	}
+	policy, err := engine.PolicyForName(cfg.SmartEngine.Policy)
+	if err != nil || policy.Version != cfg.SmartEngine.PolicyVersion {
+		return errors.New("configured Smart Engine policy is invalid")
+	}
+	for _, ranking := range report.Rankings {
+		if ranking.CandidateID == selected {
+			if !ranking.Qualified {
+				return errors.New("latest tune evidence rejected the backend")
+			}
+			var recorded *engine.CandidateEvidence
+			for index := range report.Candidates {
+				if report.Candidates[index].Candidate.ID == selected {
+					recorded = &report.Candidates[index]
+					break
+				}
+			}
+			if recorded == nil || !recorded.Ranking.Qualified || recorded.Ranking.Metrics != ranking.Metrics {
+				return errors.New("tune report candidate evidence is inconsistent")
+			}
+			evidence, err := engine.LoadEvidence(filepath.Join(dataDir(), "benchmarks", device.Fingerprint), selected)
+			if err != nil || evidence.DeviceFingerprint != device.Fingerprint {
+				return errors.New("selected backend evidence is missing or belongs to another device")
+			}
+			if recorded.Evidence.SchemaVersion != evidence.SchemaVersion || recorded.Evidence.CandidateID != evidence.CandidateID || recorded.Evidence.DeviceFingerprint != evidence.DeviceFingerprint || recorded.Evidence.Fingerprint != evidence.Fingerprint || recorded.Evidence.PolicyName != report.Policy.Name || recorded.Evidence.PolicyVersion != report.Policy.Version || recorded.Evidence.Metrics != evidence.Metrics || evidence.PolicyName != report.Policy.Name || evidence.PolicyVersion != report.Policy.Version {
+				return errors.New("selected backend evidence is not bound to the tune report")
+			}
+			rankings, err := engine.Rank([]engine.Evidence{evidence}, policy)
+			if err != nil || len(rankings) != 1 || !rankings[0].Qualified {
+				return errors.New("persisted backend evidence is no longer qualified")
+			}
+			return nil
+		}
+	}
+	return errors.New("latest tune evidence does not contain the backend")
 }
 
 func runEngineList(args []string, stdout, stderr io.Writer) int {

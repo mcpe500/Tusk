@@ -56,6 +56,41 @@ func TestTranslateHostPathSuggestsShareForUnregisteredPath(t *testing.T) {
 	}
 }
 
+func TestTranslateHostPathRejectsSymlinkEscape(t *testing.T) {
+	t.Parallel()
+	directory := t.TempDir()
+	registry, err := DefaultShareRegistry(filepath.Join(directory, "workspaces"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	project := filepath.Join(directory, "project")
+	outside := filepath.Join(directory, "outside")
+	if err := makeDirectory(project); err != nil {
+		t.Fatal(err)
+	}
+	if err := makeDirectory(outside); err != nil {
+		t.Fatal(err)
+	}
+	registry, err = AddShare(registry, project, "project", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(project, "escape")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := TranslateHostPath(link, directory, registry); err == nil {
+		t.Fatal("symlink escape was translated as a shared path")
+	}
+	dangling := filepath.Join(project, "dangling")
+	if err := os.Symlink(filepath.Join(outside, "not-created"), dangling); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := TranslateHostPath(dangling, directory, registry); err == nil {
+		t.Fatal("dangling symlink escape was translated as a shared path")
+	}
+}
+
 func makeDirectory(path string) error {
 	return os.MkdirAll(path, 0o700)
 }

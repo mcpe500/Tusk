@@ -20,7 +20,7 @@ import (
 	"github.com/mcpe500/Tusk/internal/state"
 )
 
-const prootStateSchemaVersion = 1
+const prootStateSchemaVersion = 2
 
 type ProotConfig struct {
 	CandidateID       string
@@ -54,6 +54,8 @@ type prootState struct {
 	SchemaVersion int            `json:"schemaVersion"`
 	CandidateID   string         `json:"candidateId"`
 	State         LifecycleState `json:"state"`
+	PID           int            `json:"pid,omitempty"`
+	StartTicks    uint64         `json:"startTicks,omitempty"`
 	LastError     string         `json:"lastError,omitempty"`
 	UpdatedAt     time.Time      `json:"updatedAt"`
 }
@@ -247,6 +249,9 @@ func (adapter *ProotAdapter) Initialize(_ context.Context) error {
 	if err := validateProotPaths(adapter.config); err != nil {
 		return err
 	}
+	if existing, err := adapter.readState(); err == nil && existing.State == StateReady && existing.PID > 0 && existing.StartTicks > 0 && processStartTicks(existing.PID) == existing.StartTicks {
+		return errors.New("cannot initialize proot while its recorded service is still running")
+	}
 	if info, err := os.Stat(adapter.config.Rootfs); err != nil {
 		_ = adapter.writeState(prootState{SchemaVersion: prootStateSchemaVersion, CandidateID: adapter.config.CandidateID, State: StateUninitialized, LastError: err.Error()})
 		return fmt.Errorf("initialize proot backend: rootfs is unavailable: %w", err)
@@ -286,7 +291,12 @@ func (adapter *ProotAdapter) Start(ctx context.Context) error {
 		_ = adapter.writeState(prootState{SchemaVersion: prootStateSchemaVersion, CandidateID: adapter.config.CandidateID, State: StateDegraded, LastError: err.Error()})
 		return fmt.Errorf("check proot readiness: %w", err)
 	}
-	if err := adapter.writeState(prootState{SchemaVersion: prootStateSchemaVersion, CandidateID: adapter.config.CandidateID, State: StateReady}); err != nil {
+	pid, startTicks, err := adapter.serviceIdentity()
+	if err != nil {
+		_ = adapter.stopLocked(context.Background(), true)
+		return err
+	}
+	if err := adapter.writeState(prootState{SchemaVersion: prootStateSchemaVersion, CandidateID: adapter.config.CandidateID, State: StateReady, PID: pid, StartTicks: startTicks}); err != nil {
 		_ = adapter.stopLocked(context.Background(), true)
 		return err
 	}
@@ -362,6 +372,9 @@ func (adapter *ProotAdapter) Status(_ context.Context) (RuntimeStatus, error) {
 		return RuntimeStatus{State: StateError, Detail: err.Error()}, err
 	}
 	if stored.State == StateReady {
+		if stored.PID <= 0 || stored.StartTicks == 0 || processStartTicks(stored.PID) != stored.StartTicks {
+			return RuntimeStatus{State: StateDegraded, Detail: "proot Podman service identity is stale"}, errors.New("proot Podman service identity is stale")
+		}
 		if err := adapter.verifyStorage(); err != nil {
 			return RuntimeStatus{State: StateDegraded, Detail: err.Error()}, err
 		}
@@ -383,6 +396,9 @@ func (adapter *ProotAdapter) APIEndpoint(_ context.Context) (string, error) {
 	}
 	if stored.State != StateReady {
 		return "", fmt.Errorf("proot backend is %s, API socket is unavailable", stored.State)
+	}
+	if stored.PID <= 0 || stored.StartTicks == 0 || processStartTicks(stored.PID) != stored.StartTicks {
+		return "", errors.New("proot Podman service identity is stale")
 	}
 	if err := adapter.verifyAPI(context.Background()); err != nil {
 		return "", err
@@ -526,7 +542,25 @@ func (adapter *ProotAdapter) RecreateAPI(ctx context.Context) error {
 	if _, err := adapter.Health(ctx); err != nil {
 		return err
 	}
-	return adapter.writeState(prootState{SchemaVersion: prootStateSchemaVersion, CandidateID: adapter.config.CandidateID, State: StateReady})
+	pid, startTicks, err := adapter.serviceIdentity()
+	if err != nil {
+		return err
+	}
+	return adapter.writeState(prootState{SchemaVersion: prootStateSchemaVersion, CandidateID: adapter.config.CandidateID, State: StateReady, PID: pid, StartTicks: startTicks})
+}
+
+func (adapter *ProotAdapter) serviceIdentity() (int, uint64, error) {
+	adapter.mu.Lock()
+	service := adapter.service
+	adapter.mu.Unlock()
+	if service == nil || service.Process == nil {
+		return 0, 0, errors.New("proot Podman service has no process identity")
+	}
+	startTicks := processStartTicks(service.Process.Pid)
+	if startTicks == 0 {
+		return 0, 0, errors.New("proot Podman service start identity is unavailable")
+	}
+	return service.Process.Pid, startTicks, nil
 }
 
 func (adapter *ProotAdapter) execute(ctx context.Context, command Command) (CommandResult, error) {
