@@ -14,7 +14,8 @@ The canonical product and system contract is:
 |---|---|
 | M0 Canonical specification and reset | Complete |
 | M1 Host foundation | Complete |
-| M2 Probe and qualification framework | Not started |
+| M2 Probe and qualification framework | Complete |
+| M3 Proot candidates | Not started |
 
 M1 includes:
 

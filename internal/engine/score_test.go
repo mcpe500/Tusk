@@ -59,6 +59,19 @@ func TestRankTieBreaksByMemory(t *testing.T) {
 	}
 }
 
+func TestRankRejectsBudgetRejectionReasons(t *testing.T) {
+	t.Parallel()
+	evidence := validEvidence("thermal-limited")
+	evidence.RejectionReasons = []string{"thermal retention 0.500 is below budget 0.800"}
+	ranked, err := Rank([]Evidence{evidence}, BalancedPolicy())
+	if err != nil {
+		t.Fatalf("Rank() error = %v", err)
+	}
+	if ranked[0].Qualified || len(ranked[0].Reasons) == 0 {
+		t.Fatalf("budget-rejected candidate was qualified: %#v", ranked[0])
+	}
+}
+
 func validEvidence(id string) Evidence {
 	return Evidence{
 		CandidateID:             id,

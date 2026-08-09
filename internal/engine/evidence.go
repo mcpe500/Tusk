@@ -3,18 +3,22 @@ package engine
 import "time"
 
 type Evidence struct {
-	SchemaVersion           int       `json:"schemaVersion"`
-	CandidateID             string    `json:"candidateId"`
-	DeviceFingerprint       string    `json:"deviceFingerprint"`
-	CollectedAt             time.Time `json:"collectedAt"`
-	ConformanceVersion      int       `json:"conformanceVersion"`
-	BenchmarkVersion        int       `json:"benchmarkVersion"`
-	PolicyName              string    `json:"policyName"`
-	PolicyVersion           int       `json:"policyVersion"`
-	RequiredConformancePass bool      `json:"requiredConformancePass"`
-	PlatformCompatible      bool      `json:"platformCompatible"`
-	Reliability             float64   `json:"reliability"`
-	Metrics                 Metrics   `json:"metrics"`
+	SchemaVersion           int               `json:"schemaVersion"`
+	CandidateID             string            `json:"candidateId"`
+	Fingerprint             string            `json:"fingerprint"`
+	DeviceFingerprint       string            `json:"deviceFingerprint"`
+	CollectedAt             time.Time         `json:"collectedAt"`
+	ConformanceVersion      int               `json:"conformanceVersion"`
+	BenchmarkVersion        int               `json:"benchmarkVersion"`
+	PolicyName              string            `json:"policyName"`
+	PolicyVersion           int               `json:"policyVersion"`
+	RequiredConformancePass bool              `json:"requiredConformancePass"`
+	PlatformCompatible      bool              `json:"platformCompatible"`
+	Reliability             float64           `json:"reliability"`
+	Metrics                 Metrics           `json:"metrics"`
+	Conformance             ConformanceResult `json:"conformance"`
+	Benchmark               BenchmarkResult   `json:"benchmark"`
+	RejectionReasons        []string          `json:"rejectionReasons,omitempty"`
 }
 
 type Metrics struct {

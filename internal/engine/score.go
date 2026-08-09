@@ -76,6 +76,9 @@ func qualificationFailures(item Evidence, policy Policy) []string {
 	if !item.PlatformCompatible {
 		reasons = append(reasons, "requested platform is incompatible")
 	}
+	if len(item.RejectionReasons) > 0 {
+		reasons = append(reasons, item.RejectionReasons...)
+	}
 	if item.Reliability < policy.MinReliability {
 		reasons = append(reasons, fmt.Sprintf("reliability %.3f is below %.3f", item.Reliability, policy.MinReliability))
 	}
@@ -177,4 +180,45 @@ func validatePolicy(policy Policy) error {
 
 func almostEqual(left, right float64) bool {
 	return math.Abs(left-right) <= 1e-9
+}
+
+func PolicyForName(name string) (Policy, error) {
+	policy := BalancedPolicy()
+	switch name {
+	case "balanced":
+		return policy, nil
+	case "speed":
+		policy.Weights = map[string]float64{
+			"reliability":        0.25,
+			"interactiveLatency": 0.30,
+			"throughput":         0.25,
+			"memory":             0.05,
+			"startupShutdown":    0.10,
+			"storage":            0.02,
+			"thermal":            0.03,
+		}
+	case "low-memory":
+		policy.Weights = map[string]float64{
+			"reliability":        0.25,
+			"interactiveLatency": 0.10,
+			"throughput":         0.05,
+			"memory":             0.35,
+			"startupShutdown":    0.10,
+			"storage":            0.12,
+			"thermal":            0.03,
+		}
+	case "compatibility":
+		policy.Weights = map[string]float64{
+			"reliability":        0.35,
+			"interactiveLatency": 0.10,
+			"throughput":         0.10,
+			"memory":             0.10,
+			"startupShutdown":    0.05,
+			"storage":            0.05,
+			"thermal":            0.25,
+		}
+	default:
+		return Policy{}, fmt.Errorf("unsupported policy %q", name)
+	}
+	return policy, nil
 }
