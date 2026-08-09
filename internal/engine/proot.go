@@ -574,7 +574,6 @@ func (adapter *ProotAdapter) prootArgs(command []string) []string {
 	if adapter.config.CandidateID == "proot-qemu-user-x86_64" {
 		args = append(args, "-q", adapter.config.QEMUUserPath)
 	}
-	args = append(args, "--")
 	return append(args, command...)
 }
 

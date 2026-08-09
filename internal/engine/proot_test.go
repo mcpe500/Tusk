@@ -45,6 +45,11 @@ func TestProotAdapterInitializesPersistentStateAndBuildsVector(t *testing.T) {
 	}
 	args := adapter.prootArgs([]string{"podman", "info"})
 	joined := strings.Join(args, " ")
+	for _, arg := range args {
+		if arg == "--" {
+			t.Fatalf("proot args contain unsupported option separator: %q", args)
+		}
+	}
 	for _, expected := range []string{"-r " + rootfs, "-q /usr/bin/qemu-x86_64", "podman info"} {
 		if !strings.Contains(joined, expected) {
 			t.Fatalf("proot args %q missing %q", joined, expected)
