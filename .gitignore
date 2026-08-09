@@ -1,55 +1,17 @@
-# Binaries
+# Build outputs
+/bin/
+/dist/
 /tusk
-/tuskd
-*.exe
 
-# Build artifacts
-dist/
-build/
-*.o
-*.a
+# Test and profiling outputs
+/coverage.out
+/*.prof
 
-# Go
-vendor/
-go.work
-go.work.sum
-.gocache/
+# Local runtime state
+/.tusk-dev/
 
-# IDE
+# Editor and OS files
+.DS_Store
 .idea/
 .vscode/
 *.swp
-*.swo
-*~
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Test
-*.test
-coverage.out
-coverage.html
-
-# Runtime data
-.tusk/
-*.sock
-*.qcow2
-*.img
-
-# Logs
-*.log
-
-# Local config
-.env
-.env.local
-
-# Temporary files
-tmp/
-temp/
-*.tmp
-
-# opencode session state
-.opencode/
-.skynex/production-gate.json
-.skynex/audit.log

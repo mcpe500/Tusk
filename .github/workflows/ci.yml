@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+          cache: true
+
+      - name: Check formatting
+        run: test -z "$(gofmt -l .)"
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -cover ./...
+
+      - name: Race test
+        run: go test -race ./...
+
+      - name: Build Android ARM64 host binary
+        env:
+          CGO_ENABLED: '0'
+          GOOS: android
+          GOARCH: arm64
+        run: go build -buildvcs=false -o /tmp/tusk-android-arm64 ./cmd/tusk

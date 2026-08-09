@@ -1,58 +1,30 @@
-.PHONY: build clean test lint install
+.PHONY: build test race vet fmt fmt-check check build-android clean
 
-# Build both binaries
+GO ?= go
+
 build:
-	@echo "Building tusk CLI..."
-	go build -o tusk ./cmd/tusk
-	@echo "Building tuskd daemon..."
-	go build -o tuskd ./cmd/tuskd
-	@echo "Build complete!"
+	$(GO) build -o bin/tusk ./cmd/tusk
 
-# Clean build artifacts
-clean:
-	rm -f tusk tuskd
-	rm -f coverage.out coverage.html
-
-# Run tests
 test:
-	go test -v -cover ./...
+	$(GO) test -cover ./...
 
-# Run tests with coverage
-test-cover:
-	go test -coverprofile=coverage.out ./...
-	go tool cover -html=coverage.out -o coverage.html
+race:
+	$(GO) test -race ./...
 
-# Lint code
-lint:
-	go fmt ./...
-	go vet ./...
+vet:
+	$(GO) vet ./...
 
-# Install to $GOPATH/bin
-install: build
-	go install ./cmd/tusk
-	go install ./cmd/tuskd
-
-# Format code
 fmt:
-	go fmt ./...
+	$(GO) fmt ./...
 
-# Tidy dependencies
-tidy:
-	go mod tidy
+fmt-check:
+	@test -z "$$(gofmt -l .)"
 
-# Run all checks
-check: fmt lint test
+build-android:
+	@mkdir -p dist
+	CGO_ENABLED=0 GOOS=android GOARCH=arm64 $(GO) build -buildvcs=false -o dist/tusk-android-arm64 ./cmd/tusk
 
-# Help
-help:
-	@echo "Available targets:"
-	@echo "  build      - Build both binaries"
-	@echo "  clean      - Remove build artifacts"
-	@echo "  test       - Run tests"
-	@echo "  test-cover - Run tests with coverage report"
-	@echo "  lint       - Run go vet and format"
-	@echo "  install    - Build and install to PATH"
-	@echo "  fmt        - Format code"
-	@echo "  tidy       - Tidy dependencies"
-	@echo "  check      - Run fmt, lint, and test"
-	@echo "  help       - Show this help"
+check: fmt-check vet test race build-android
+
+clean:
+	rm -rf bin dist coverage.out
