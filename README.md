@@ -19,6 +19,7 @@ The canonical product and system contract is:
 | M4 QEMU candidate matrix | In progress (real-device gates pending) |
 | M5 Podman host bridge | In progress (real backend gates pending) |
 | M6 Storage and networking integration | In progress (real backend gates pending) |
+| M7 Compose workflow | In progress (real backend gates pending) |
 
 M1 includes:
 

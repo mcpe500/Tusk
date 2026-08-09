@@ -45,7 +45,11 @@ func ForwardPodman(ctx context.Context, adapter Adapter, args []string, stdin io
 		return result, err
 	}
 	if reconcileErr := options.Reconciler.Reconcile(ctx, AdapterPortSource{Adapter: adapter}); reconcileErr != nil {
-		return result, fmt.Errorf("port reconciliation failed; guest resources may be running: %w", reconcileErr)
+		cleanup := "podman rm -f <container>"
+		if len(args) > 0 && args[0] == "compose" {
+			cleanup = "podman compose down"
+		}
+		return result, fmt.Errorf("port reconciliation failed; guest resources may be running; cleanup with `%s`: %w", cleanup, reconcileErr)
 	}
 	return result, nil
 }

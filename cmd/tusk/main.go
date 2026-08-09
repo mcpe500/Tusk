@@ -54,6 +54,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runEngine(args[1:], stdout, stderr)
 	case "podman":
 		return runPodman(args[1:], false, stdout, stderr)
+	case "compose":
+		if len(args) == 2 && args[1] == "features" {
+			return writeJSON(stdout, stderr, engine.ComposeFeatureMatrix())
+		}
+		return runPodman(append([]string{"compose"}, args[1:]...), false, stdout, stderr)
 	case "status":
 		return runStatus(args[1:], stdout, stderr)
 	case "env":
@@ -74,6 +79,15 @@ func runPodman(args []string, composeAlias bool, stdout, stderr io.Writer) int {
 	helpRequested := len(args) == 1 && (args[0] == "--help" || args[0] == "-h" || (composeAlias && args[0] == "help"))
 	if composeAlias && !helpRequested {
 		args = append([]string{"compose"}, args...)
+	}
+	isCompose := len(args) > 0 && args[0] == "compose"
+	if isCompose && !helpRequested {
+		validated, err := engine.ComposeArgs(args[1:])
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return exUsage
+		}
+		args = validated
 	}
 	if helpRequested {
 		backend := "auto (qualification required)"
@@ -103,6 +117,14 @@ func runPodman(args []string, composeAlias bool, stdout, stderr io.Writer) int {
 	if selected == "" || selected == "auto" {
 		fmt.Fprintf(stderr, "no qualified backend is selected; run %s\n", engine.RecoveryTuneCommand)
 		return exUnavailable
+	}
+	var composeMetadata engine.ComposeMetadata
+	if isCompose && !helpRequested {
+		composeMetadata, err = engine.LoadComposeMetadata(filepath.Join(dataDir(), "engines", selected, "compose.json"))
+		if err != nil {
+			fmt.Fprintf(stderr, "load pinned Compose provider: %v\n", err)
+			return exUnavailable
+		}
 	}
 	var candidate engine.Candidate
 	for _, item := range engine.Catalog() {
@@ -167,7 +189,11 @@ func runPodman(args []string, composeAlias bool, stdout, stderr io.Writer) int {
 		return exUnavailable
 	}
 	if versionOutput {
-		fmt.Fprintf(stdout, "Tusk shim: %s\nSmart Engine policy: %s v%d\nSelected backend: %s\nReal Podman:\n%s", version, cfg.SmartEngine.Policy, cfg.SmartEngine.PolicyVersion, selected, captured.String())
+		fmt.Fprintf(stdout, "Tusk shim: %s\nSmart Engine policy: %s v%d\nSelected backend: %s\n", version, cfg.SmartEngine.Policy, cfg.SmartEngine.PolicyVersion, selected)
+		if composeMetadata.Provider.Version != "" {
+			fmt.Fprintf(stdout, "Compose provider: %s %s\n", composeMetadata.Provider.Name, composeMetadata.Provider.Version)
+		}
+		fmt.Fprintf(stdout, "Real Podman:\n%s", captured.String())
 	}
 	return result.ExitCode
 }
@@ -620,6 +646,8 @@ func printUsage(writer io.Writer) {
 	fmt.Fprintln(writer, "  engine list [--ranked]     list candidates or ranked evidence")
 	fmt.Fprintln(writer, "  engine current             show selected backend evidence")
 	fmt.Fprintln(writer, "  podman <args...>           forward to real Podman in selected backend")
+	fmt.Fprintln(writer, "  compose <args...>          explicit Compose forwarding fallback")
+	fmt.Fprintln(writer, "  compose features           show the tested provider feature matrix")
 	fmt.Fprintln(writer, "  status                     show selected backend and qualification")
 	fmt.Fprintln(writer, "  env                       print the protected Podman API endpoint")
 	fmt.Fprintln(writer, "  share list|add|remove     manage explicit host shares")

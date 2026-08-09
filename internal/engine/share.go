@@ -233,7 +233,7 @@ func TranslatePodmanArgs(args []string, workingDirectory string, registry ShareR
 			index++
 			continue
 		}
-		if argument == "-f" || argument == "--file" {
+		if argument == "-f" || argument == "--file" || argument == "--env-file" || argument == "--project-directory" {
 			if index+1 >= len(translated) {
 				return nil, "", fmt.Errorf("%s requires a value", argument)
 			}
