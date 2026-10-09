@@ -462,7 +462,7 @@ func (adapter *QEMUAdapter) RemoveTCP(ctx context.Context, port PublishedPort) e
 }
 
 func (adapter *QEMUAdapter) qemuArgs() []string {
-	args := []string{adapter.config.QEMUPath, "-machine", adapter.config.Machine, "-m", strconv.Itoa(adapter.config.MemoryMiB), "-smp", strconv.Itoa(adapter.config.CPUs), "-drive", "file=" + adapter.config.SystemImage + ",if=virtio,format=qcow2", "-drive", "file=" + adapter.config.DataImage + ",if=virtio,format=qcow2", "-nographic", "-serial", "file:" + adapter.serialPath(), "-qmp", "unix:" + adapter.qmpPath() + ",server=on,wait=off", "-netdev", "user,id=net0,hostfwd=tcp:127.0.0.1:" + strconv.Itoa(adapter.config.SSHPort) + "-:22", "-device", "virtio-net-pci,netdev=net0", "-pidfile", adapter.pidPath()}
+	args := []string{adapter.config.QEMUPath, "-machine", adapter.config.Machine, "-cpu", qemuCPUModel(adapter.config.CandidateID), "-m", strconv.Itoa(adapter.config.MemoryMiB), "-smp", strconv.Itoa(adapter.config.CPUs), "-drive", "file=" + adapter.config.SystemImage + ",if=virtio,format=qcow2", "-drive", "file=" + adapter.config.DataImage + ",if=virtio,format=qcow2", "-no-reboot", "-nographic", "-serial", "file:" + adapter.serialPath(), "-qmp", "unix:" + adapter.qmpPath() + ",server=on,wait=off", "-netdev", "user,id=net0,hostfwd=tcp:127.0.0.1:" + strconv.Itoa(adapter.config.SSHPort) + "-:22", "-device", "virtio-net-pci,netdev=net0", "-device", "virtio-rng-pci", "-device", "virtio-balloon", "-pidfile", adapter.pidPath()}
 	if adapter.config.UseKVM {
 		args = append(args, "-enable-kvm")
 	} else {
@@ -711,6 +711,13 @@ func isQEMUCandidate(id string) bool {
 
 func qemuArchitecture(id string) string {
 	return strings.TrimPrefix(id, "qemu-system-")
+}
+
+func qemuCPUModel(id string) string {
+	if id == "qemu-system-aarch64" || id == "qemu-system-arm" {
+		return "cortex-a76"
+	}
+	return "max"
 }
 
 func qemuMachine(id string) string {
