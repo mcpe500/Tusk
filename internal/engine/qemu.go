@@ -191,7 +191,14 @@ func (adapter *QEMUAdapter) Start(ctx context.Context) error {
 	adapter.lifecycleMu.Lock()
 	defer adapter.lifecycleMu.Unlock()
 	started := time.Now()
-	if stored, err := adapter.readState(); err == nil && stored.SSHPort > 0 {
+	if adapter.config.SSHPort == 0 {
+		port, err := reserveLoopbackPort()
+		if err != nil {
+			return fmt.Errorf("reserve QEMU SSH port: %w", err)
+		}
+		adapter.config.SSHPort = port
+	}
+	if stored, err := adapter.readState(); err == nil && stored.SSHPort > 0 && adapter.config.SSHPort == 0 {
 		adapter.config.SSHPort = stored.SSHPort
 	}
 	if stored, err := adapter.readState(); err == nil && stored.State == StateReady && stored.PID > 0 && processStartTicks(stored.PID) == stored.StartTicks {
@@ -462,7 +469,7 @@ func (adapter *QEMUAdapter) RemoveTCP(ctx context.Context, port PublishedPort) e
 }
 
 func (adapter *QEMUAdapter) qemuArgs() []string {
-	args := []string{adapter.config.QEMUPath, "-machine", adapter.config.Machine, "-cpu", qemuCPUModel(adapter.config.CandidateID), "-m", strconv.Itoa(adapter.config.MemoryMiB), "-smp", strconv.Itoa(adapter.config.CPUs), "-drive", "file=" + adapter.config.SystemImage + ",if=virtio,format=qcow2", "-drive", "file=" + adapter.config.DataImage + ",if=virtio,format=qcow2", "-no-reboot", "-nographic", "-serial", "file:" + adapter.serialPath(), "-qmp", "unix:" + adapter.qmpPath() + ",server=on,wait=off", "-netdev", "user,id=net0,hostfwd=tcp:127.0.0.1:" + strconv.Itoa(adapter.config.SSHPort) + "-:22", "-device", "virtio-net-pci,netdev=net0", "-device", "virtio-rng-pci", "-device", "virtio-balloon", "-pidfile", adapter.pidPath()}
+	args := []string{adapter.config.QEMUPath, "-machine", adapter.config.Machine, "-cpu", qemuCPUModel(adapter.config.CandidateID), "-m", strconv.Itoa(adapter.config.MemoryMiB), "-smp", strconv.Itoa(adapter.config.CPUs), "-drive", "file=" + adapter.config.SystemImage + ",if=virtio,format=qcow2", "-drive", "file=" + adapter.config.DataImage + ",if=virtio,format=qcow2", "-no-reboot", "-display", "none", "-serial", "file:" + adapter.serialPath(), "-qmp", "unix:" + adapter.qmpPath() + ",server=on,wait=off", "-netdev", "user,id=net0,hostfwd=tcp:127.0.0.1:" + strconv.Itoa(adapter.config.SSHPort) + "-:22", "-device", "virtio-net-pci,netdev=net0", "-device", "virtio-rng-pci", "-device", "virtio-balloon", "-pidfile", adapter.pidPath()}
 	if adapter.config.UseKVM {
 		args = append(args, "-enable-kvm")
 	} else {

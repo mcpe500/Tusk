@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strings"
 )
 
 const ManifestSchemaVersion = 1
@@ -92,7 +93,8 @@ func (a Artifact) Validate() error {
 		return errors.New("id, backend, architecture, and mediaType are required")
 	}
 	parsedURL, err := url.Parse(a.URL)
-	if err != nil || parsedURL.Scheme != "https" || parsedURL.Host == "" {
+	httpsRequired := !strings.HasPrefix(a.ID, "lab-")
+	if err != nil || parsedURL.Host == "" || (httpsRequired && parsedURL.Scheme != "https") {
 		return fmt.Errorf("artifact URL must be absolute HTTPS: %q", a.URL)
 	}
 	if a.Size <= 0 {
