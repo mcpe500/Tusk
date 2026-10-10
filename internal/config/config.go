@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 
 	"github.com/mcpe500/Tusk/internal/state"
 )
@@ -49,7 +50,7 @@ func Default() Config {
 		Engines: map[string]EngineConfig{
 			"proot-native":        {},
 			"qemu-system-aarch64": {CPUs: 2, MemoryMiB: 1024},
-			"qemu-system-x86_64":  {CPUs: 2, MemoryMiB: 1536},
+			"qemu-system-x86_64":  {CPUs: 2, MemoryMiB: 1024},
 		},
 		Network: NetworkConfig{DefaultBindAddress: "127.0.0.1"},
 	}
@@ -98,6 +99,9 @@ func (c Config) Validate() error {
 		}
 		if engine.CPUs < 0 || engine.MemoryMiB < 0 {
 			return fmt.Errorf("engine %q resources must not be negative", id)
+		}
+		if strings.HasPrefix(id, "qemu-system-") && (engine.CPUs > 2 || (engine.MemoryMiB != 0 && engine.MemoryMiB > 1024)) {
+			return fmt.Errorf("engine %q exceeds the mobile safety budget: use at most 2 CPUs and 1024 MiB", id)
 		}
 	}
 	if net.ParseIP(c.Network.DefaultBindAddress) == nil {

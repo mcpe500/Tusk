@@ -589,6 +589,8 @@ func runEngine(args []string, stdout, stderr io.Writer) int {
 		return runEngineExplain(args[1:], stdout, stderr)
 	case "tune":
 		return runEngineTune(args[1:], stdout, stderr)
+	case "lab-install":
+		return runLabInstall(args[1:], stdout, stderr)
 	case "list":
 		return runEngineList(args[1:], stdout, stderr)
 	case "current":
@@ -941,6 +943,7 @@ func printEngineUsage(writer io.Writer) {
 	fmt.Fprintln(writer, "  candidates [--json]")
 	fmt.Fprintln(writer, "  explain [--json] <candidate>")
 	fmt.Fprintln(writer, "  tune [options]")
+	fmt.Fprintln(writer, "  lab-install [options] install explicit signed lab guest images")
 	fmt.Fprintln(writer, "  list [--ranked]")
 	fmt.Fprintln(writer, "  current")
 }
